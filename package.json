@@ -1,0 +1,18 @@
+{
+  "name": "form-manager",
+  "version": "1.0.0",
+  "description": "LUJIFO跨境电商ERP系统",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^9.0.3",
+    "sql.js": "^1.12.0",
+    "xlsx": "^0.18.5"
+  }
+}

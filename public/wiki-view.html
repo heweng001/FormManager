@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>阅读文章 - LUJIFO跨境电商ERP系统</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet" />
+</head>
+<body>
+  <script src="/js/common.js"></script>
+  <script>
+    async function init() {
+      await requireLogin();
+      const articleId = new URLSearchParams(window.location.search).get('id');
+      if (!articleId) {
+        window.location.href = '/wiki.html';
+        return;
+      }
+
+      renderShell({
+        active: 'wiki',
+        breadcrumb: '一级菜单 / <a href="/wiki.html">Wiki</a> / <strong>阅读</strong>',
+        meta: '文章阅读',
+        content: `
+          <div class="erp-page-header erp-page-header-row">
+            <div><h1 id="articleTitle" class="erp-page-title">加载中...</h1></div>
+            <a href="/wiki.html" class="erp-btn erp-btn-secondary">返回列表</a>
+          </div>
+          <div class="erp-card">
+            <div class="erp-card-body">
+              <div id="articleMeta" class="wiki-article-meta">加载中...</div>
+              <div id="articleContent" class="wiki-article-content ql-editor">加载中...</div>
+            </div>
+          </div>
+        `,
+      });
+
+      const { res, data } = await api(`/api/articles/${articleId}`);
+      if (!res.ok) {
+        alert(data.message || '文章不存在');
+        window.location.href = '/wiki.html';
+        return;
+      }
+
+      const article = data.data;
+      document.title = `${article.title} - LUJIFO跨境电商ERP系统`;
+      document.getElementById('articleTitle').textContent = article.title;
+      document.getElementById('articleMeta').innerHTML = `
+        <span>发布人：${escapeHtml(article.author || '未知')}</span>
+        <span>发布日期：${escapeHtml(formatDateTime(article.create_time))}</span>
+        <span>最近更新：${escapeHtml(formatDateTime(article.update_time))}</span>
+      `;
+      document.getElementById('articleContent').innerHTML = article.content || '<p class="erp-empty">暂无内容</p>';
+      document.querySelectorAll('#articleContent img').forEach((img) => {
+        img.addEventListener('error', () => {
+          img.alt = '图片无法加载（请重新上传图片到系统）';
+          img.classList.add('wiki-broken-image');
+        });
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>

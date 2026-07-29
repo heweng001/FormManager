@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+
+<head>
+
+  <meta charset="UTF-8" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>skuID设置 - LUJIFO跨境电商ERP系统</title>
+
+  <link rel="stylesheet" href="/styles.css" />
+
+</head>
+
+<body>
+
+  <script src="/js/common.js"></script>
+
+  <script>
+
+    let editingId = null;
+
+    let skuList = [];
+
+
+
+    async function init() {
+
+      await requireLogin();
+
+      if (!isManager()) {
+
+        alert('无权限访问 skuID 设置');
+
+        window.location.href = '/influencers.html';
+
+        return;
+
+      }
+
+      renderShell({
+
+        active: 'sku-settings',
+
+        breadcrumb: '一级菜单 / <strong>更多</strong> / <strong>skuID设置</strong>',
+
+        meta: 'skuID、型号与店铺名称映射',
+
+        content: `
+
+          <div class="erp-page-header erp-page-header-row">
+
+            <div>
+
+              <h1 class="erp-page-title">skuID 设置</h1>
+
+              <p class="erp-page-desc">维护 skuID、型号、店铺名称的对应关系。保存后，达人数据库中相同 skuID 的行会自动显示对应型号与店铺名称。</p>
+
+            </div>
+
+            <button id="newSkuBtn" class="erp-btn erp-btn-primary">新增映射</button>
+
+          </div>
+
+          <div class="erp-card">
+
+            <div class="erp-table-wrap">
+
+              <table class="erp-table">
+
+                <thead><tr><th>skuID</th><th>型号</th><th>店铺名称</th><th>更新时间</th><th>操作</th></tr></thead>
+
+                <tbody id="skuTableBody"><tr><td colspan="5" class="erp-empty">加载中...</td></tr></tbody>
+
+              </table>
+
+            </div>
+
+          </div>
+
+          <div id="skuModal" class="erp-modal-overlay hidden">
+
+            <div class="erp-modal">
+
+              <div class="erp-modal-header" id="skuModalTitle">新增映射</div>
+
+              <div class="erp-modal-body">
+
+                <div class="erp-form-field"><label>skuID</label><input id="skuIdInput" class="erp-input erp-input-wide" placeholder="如 123456" /></div>
+
+                <div class="erp-form-field"><label>型号</label><input id="modelNameInput" class="erp-input erp-input-wide" placeholder="如 洞洞款千鸟格" /></div>
+
+                <div class="erp-form-field"><label>店铺名称</label><input id="shopNameInput" class="erp-input erp-input-wide" placeholder="如 LUJIFO Official" /></div>
+
+              </div>
+
+              <div class="erp-modal-footer">
+
+                <button class="erp-btn erp-btn-secondary" id="cancelSkuBtn">取消</button>
+
+                <button class="erp-btn erp-btn-primary" id="saveSkuBtn">保存</button>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        `,
+
+      });
+
+      document.getElementById('newSkuBtn').addEventListener('click', () => openSkuModal());
+
+      document.getElementById('cancelSkuBtn').addEventListener('click', closeSkuModal);
+
+      document.getElementById('saveSkuBtn').addEventListener('click', saveSku);
+
+      loadSkuModels();
+
+    }
+
+
+
+    async function loadSkuModels() {
+
+      const { res, data } = await api('/api/sku-models');
+
+      const tbody = document.getElementById('skuTableBody');
+
+      if (!res.ok) {
+
+        tbody.innerHTML = `<tr><td colspan="5" class="erp-empty">加载失败：${escapeHtml(data.message || '网络错误')}</td></tr>`;
+
+        return;
+
+      }
+
+      skuList = Array.isArray(data.data) ? data.data : [];
+
+      if (!skuList.length) {
+
+        tbody.innerHTML = '<tr><td colspan="5" class="erp-empty">暂无 skuID 映射</td></tr>';
+
+        return;
+
+      }
+
+      tbody.innerHTML = skuList.map((item) => `
+
+        <tr>
+
+          <td>${escapeHtml(item.sku_id)}</td>
+
+          <td>${escapeHtml(item.model_name)}</td>
+
+          <td>${escapeHtml(item.shop_name || '-')}</td>
+
+          <td class="cell-muted">${formatDateTime(item.update_time)}</td>
+
+          <td>
+
+            <button type="button" class="erp-btn erp-btn-secondary erp-btn-view" data-edit="${item.id}">编辑</button>
+
+            <button type="button" class="erp-btn erp-btn-danger erp-btn-view" data-del="${item.id}" data-sku="${escapeAttr(item.sku_id)}">删除</button>
+
+          </td>
+
+        </tr>
+
+      `).join('');
+
+      tbody.querySelectorAll('[data-edit]').forEach((btn) => btn.addEventListener('click', () => openSkuModal(btn.dataset.edit)));
+
+      tbody.querySelectorAll('[data-del]').forEach((btn) => btn.addEventListener('click', () => deleteSku(btn.dataset.del, btn.dataset.sku)));
+
+    }
+
+
+
+    function openSkuModal(id) {
+
+      editingId = id || null;
+
+      document.getElementById('skuModal').classList.remove('hidden');
+
+      document.getElementById('skuModalTitle').textContent = id ? '编辑映射' : '新增映射';
+
+      if (id) {
+
+        const item = skuList.find((row) => String(row.id) === String(id));
+
+        document.getElementById('skuIdInput').value = item?.sku_id || '';
+
+        document.getElementById('modelNameInput').value = item?.model_name || '';
+
+        document.getElementById('shopNameInput').value = item?.shop_name || '';
+
+      } else {
+
+        document.getElementById('skuIdInput').value = '';
+
+        document.getElementById('modelNameInput').value = '';
+
+        document.getElementById('shopNameInput').value = '';
+
+      }
+
+    }
+
+
+
+    function closeSkuModal() {
+
+      document.getElementById('skuModal').classList.add('hidden');
+
+      editingId = null;
+
+    }
+
+
+
+    async function saveSku() {
+
+      const payload = {
+
+        sku_id: document.getElementById('skuIdInput').value.trim(),
+
+        model_name: document.getElementById('modelNameInput').value.trim(),
+
+        shop_name: document.getElementById('shopNameInput').value.trim(),
+
+      };
+
+      if (!payload.sku_id || !payload.model_name) return alert('skuID 和型号不能为空');
+
+      const url = editingId ? `/api/sku-models/${editingId}` : '/api/sku-models';
+
+      const method = editingId ? 'PUT' : 'POST';
+
+      const { res, data } = await api(url, { method, body: JSON.stringify(payload) });
+
+      if (!res.ok) return alert(data.message || '保存失败');
+
+      closeSkuModal();
+
+      loadSkuModels();
+
+    }
+
+
+
+    async function deleteSku(id, skuId) {
+
+      const label = skuId ? `「${skuId}」` : '该映射';
+
+      if (!confirm(`确定要删除${label}吗？此操作不可恢复。`)) return;
+
+      const { res, data } = await api(`/api/sku-models/${id}`, { method: 'DELETE' });
+
+      if (!res.ok) return alert(data.message || '删除失败');
+
+      loadSkuModels();
+
+    }
+
+
+
+    init();
+
+  </script>
+
+</body>
+
+</html>
+

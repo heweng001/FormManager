@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>联盟订单 - LUJIFO跨境电商ERP系统</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <script src="/js/common.js"></script>
+  <script>
+    const PAGE_SIZE = 50;
+    let currentPage = 1;
+    let totalPages = 1;
+    let tableHeaders = [];
+    let skuModelMap = {};
+    let selectedFile = null;
+    let importPanelOpen = false;
+    const rowSelection = createBatchRowSelection();
+    let urlAssignee = '';
+    let urlPaymentAfterSample = '';
+    let urlSampleDateFrom = '';
+    let urlSampleDateTo = '';
+    let urlPaymentFrom = '';
+    let urlPaymentTo = '';
+
+    async function init() {
+      await requireLogin();
+      renderShell({
+        active: 'alliance-orders',
+        breadcrumb: '一级菜单 / <strong>导数据</strong> / <strong>联盟订单</strong>',
+        meta: '联盟订单导入与查询',
+        content: `
+          <div class="erp-page-header erp-page-header-compact">
+            <h1 class="erp-page-title erp-page-title-inline">联盟订单<span class="erp-page-desc-inline"> — 导入第 1、2、3、4、5、6、8、9、11、12、13、14、16、17、18、21、22、26、27、28、29 列，首列唯一</span></h1>
+          </div>
+          <div id="lastImportBanner"></div>
+          <div class="erp-card erp-card-compact" style="margin-bottom:8px;">
+            <div class="erp-card-body erp-card-body-compact">
+              <div class="erp-toolbar erp-toolbar-compact">
+                <div class="erp-field"><label>内容 id</label><input id="filterContentId" class="erp-input" placeholder="关键词" autocomplete="off" readonly /></div>
+                <div class="erp-field"><label>达人id</label><input id="filterCreatorUsername" class="erp-input" placeholder="关键词" autocomplete="off" readonly /></div>
+                <div class="erp-field"><label>导入时间</label><select id="filterImportTime" class="erp-input"><option value="">全部</option></select></div>
+                <div class="erp-field"><label>订单 id</label><input id="filterOrderId" class="erp-input" placeholder="关键词" autocomplete="off" readonly /></div>
+                <div class="erp-field"><label>支付开始</label><input id="filterPaymentFrom" class="erp-input" placeholder="YYYYMMDD" maxlength="8" autocomplete="off" /></div>
+                <div class="erp-field"><label>支付结束</label><input id="filterPaymentTo" class="erp-input" placeholder="YYYYMMDD" maxlength="8" autocomplete="off" /></div>
+                <button id="searchBtn" class="erp-btn erp-btn-primary">查询</button>
+                <button id="resetBtn" class="erp-btn erp-btn-secondary">重置</button>
+                <div class="erp-toolbar-spacer"></div>
+                <button id="batchDeleteBtn" class="erp-btn erp-btn-secondary">批量删除</button>
+                <button id="toggleImportBtn" class="erp-btn erp-btn-secondary">Excel 导入</button>
+              </div>
+              <div id="importPanel" class="erp-import-panel hidden">
+                <div id="dropZone" class="erp-upload-zone compact">
+                  <p class="erp-upload-title">拖拽或点击上传 ${IMPORT_FILE_LABEL}</p>
+                  <p class="erp-upload-hint">首行作为表头；第 1 列为唯一标识，重复项仅提示并跳过</p>
+                  <input type="file" id="fileInput" accept="${IMPORT_FILE_ACCEPT}" style="display:none" />
+                </div>
+                <p id="fileName" class="erp-meta hidden-text"></p>
+                <div class="erp-toolbar" style="margin-top:8px;">
+                  <button id="uploadBtn" class="erp-btn erp-btn-primary" disabled>开始导入</button>
+                  <button id="cancelImportBtn" class="erp-btn erp-btn-secondary">收起</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="erp-card">
+            <div class="erp-table-wrap">
+              <table class="erp-table" id="allianceOrderTable">
+                <thead id="allianceOrderHead"><tr><th>加载中...</th></tr></thead>
+                <tbody id="allianceOrderBody"><tr><td class="erp-empty">加载中...</td></tr></tbody>
+              </table>
+            </div>
+            <div class="erp-pagination">
+              <span id="pageInfo">第 1 / 1 页，共 0 条</span>
+              <div class="erp-pagination-actions">
+                <button id="prevPageBtn" class="erp-btn erp-btn-secondary" disabled>上一页</button>
+                <button id="nextPageBtn" class="erp-btn erp-btn-secondary" disabled>下一页</button>
+              </div>
+            </div>
+          </div>
+          <div id="importModal" class="erp-modal-overlay hidden">
+            <div class="erp-modal">
+              <div class="erp-modal-header">导入完成</div>
+              <div class="erp-modal-body"><p id="importMessage"></p></div>
+              <div class="erp-modal-footer"><button id="importCloseBtn" class="erp-btn erp-btn-primary">确定</button></div>
+            </div>
+          </div>
+        `,
+      });
+      bindEvents();
+      rowSelection.setupSelectAllMenu();
+      setupFilterAutofillGuard(['filterContentId', 'filterCreatorUsername', 'filterOrderId']);
+      applyFiltersFromUrl();
+      loadOrders();
+    }
+
+    function applyFiltersFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const creator = params.get('creator_username') || '';
+      const contentId = params.get('content_id') || '';
+      const orderId = params.get('order_id') || '';
+      if (creator) document.getElementById('filterCreatorUsername').value = creator;
+      if (contentId) document.getElementById('filterContentId').value = contentId;
+      if (orderId) document.getElementById('filterOrderId').value = orderId;
+      urlAssignee = params.get('assignee') || '';
+      urlPaymentAfterSample = params.get('payment_after_sample') === '1' ? '1' : '';
+      urlSampleDateFrom = params.get('sample_date_from') || '';
+      urlSampleDateTo = params.get('sample_date_to') || '';
+      const paymentFrom = params.get('payment_from') || '';
+      const paymentTo = params.get('payment_to') || '';
+      if (paymentFrom) document.getElementById('filterPaymentFrom').value = paymentFrom;
+      if (paymentTo) document.getElementById('filterPaymentTo').value = paymentTo;
+      urlPaymentFrom = paymentFrom;
+      urlPaymentTo = paymentTo;
+    }
+
+    function getBatchFilters() {
+      const { page, pageSize, import_time, ...filters } = getFilters();
+      return filters;
+    }
+
+    function getFilters() {
+      return {
+        content_id: document.getElementById('filterContentId').value.trim(),
+        creator_username: document.getElementById('filterCreatorUsername').value.trim(),
+        order_id: document.getElementById('filterOrderId').value.trim(),
+        assignee: urlAssignee,
+        payment_after_sample: urlPaymentAfterSample,
+        sample_date_from: urlSampleDateFrom,
+        sample_date_to: urlSampleDateTo,
+        payment_from: document.getElementById('filterPaymentFrom').value.trim() || urlPaymentFrom,
+        payment_to: document.getElementById('filterPaymentTo').value.trim() || urlPaymentTo,
+        import_time: document.getElementById('filterImportTime').value.trim(),
+        page: currentPage,
+        pageSize: PAGE_SIZE,
+      };
+    }
+
+    function buildQueryString(filters) {
+      const params = new URLSearchParams();
+      Object.entries(filters).forEach(([k, v]) => {
+        if (v !== '' && v != null) params.set(k, String(v));
+      });
+      const q = params.toString();
+      return q ? `?${q}` : '';
+    }
+
+    function renderTableHead(headers) {
+      const thead = document.getElementById('allianceOrderHead');
+      if (!headers.length) {
+        thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}<th>暂无表头</th></tr>`;
+        return;
+      }
+      thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}${renderOrderTableHeadHtml(headers)}</tr>`;
+    }
+
+    function renderTableBody(rows, headers) {
+      const displayHeaders = buildOrderDisplayHeaders(headers);
+      const tbody = document.getElementById('allianceOrderBody');
+      const colSpan = Math.max(displayHeaders.length, 1) + 1;
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="${colSpan}" class="erp-empty">暂无记录</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = rows.map((row) => `
+        <tr class="alliance-order-row" data-id="${row.id}" id="alliance-order-${row.id}">
+          ${rowSelection.renderCheckboxCell(row.id)}
+          ${displayHeaders.map((header) => renderOrderTableCellHtml(row, header, skuModelMap)).join('')}
+        </tr>
+      `).join('');
+      rowSelection.bindRowCheckboxes();
+    }
+
+    async function loadImportTimeFilterOptions() {
+      const { res, data } = await api(`/api/alliance-orders/filter-options${buildQueryString(getBatchFilters())}`);
+      if (!res.ok) return;
+      populateOrderImportTimeFilter(
+        document.getElementById('filterImportTime'),
+        data.import_times || [],
+        document.getElementById('filterImportTime').value
+      );
+    }
+
+    async function loadOrders() {
+      const { res, data } = await api(`/api/alliance-orders${buildQueryString(getFilters())}`);
+      const headers = data.headers || tableHeaders;
+      if (headers.length) tableHeaders = headers;
+      skuModelMap = data.skuModelMap || {};
+      renderTableHead(tableHeaders);
+      await loadImportTimeFilterOptions();
+
+      const tbody = document.getElementById('allianceOrderBody');
+      const colSpan = Math.max(buildOrderDisplayHeaders(tableHeaders).length, 1) + 1;
+      if (!res.ok) {
+        tbody.innerHTML = `<tr><td colspan="${colSpan}" class="erp-empty">加载失败</td></tr>`;
+        return;
+      }
+
+      totalPages = data.totalPages || 1;
+      document.getElementById('pageInfo').textContent = `第 ${data.page} / ${totalPages} 页，本页 ${(data.data || []).length} 条，共 ${data.total || 0} 条`;
+      document.getElementById('prevPageBtn').disabled = data.page <= 1;
+      document.getElementById('nextPageBtn').disabled = data.page >= totalPages;
+      document.getElementById('lastImportBanner').innerHTML = renderLastImportSummary(data.lastImport);
+      renderTableBody(data.data || [], tableHeaders);
+      rowSelection.setLoadedRows(data.data || [], data.total || 0);
+    }
+
+    async function submitBatchDelete() {
+      const count = rowSelection.getSelectedCount();
+      if (!count) return alert('请先勾选要删除的记录');
+      if (!confirm(`确定要删除选中的 ${count} 条联盟订单吗？此操作不可恢复，已合作统计将随之更新。`)) return;
+
+      const btn = document.getElementById('batchDeleteBtn');
+      btn.disabled = true;
+      const oldText = btn.textContent;
+      btn.textContent = '删除中...';
+      try {
+        const { res, data } = await api('/api/alliance-orders/batch-delete', {
+          method: 'POST',
+          body: JSON.stringify(rowSelection.buildDeletePayload(getBatchFilters)),
+        });
+        if (!res.ok) return alert(data.message || '删除失败');
+        alert(`已成功删除 ${data.deleted} 条记录`);
+        rowSelection.resetSelection(false);
+        loadOrders();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = oldText;
+      }
+    }
+
+    function toggleImportPanel(forceOpen) {
+      const panel = document.getElementById('importPanel');
+      const btn = document.getElementById('toggleImportBtn');
+      importPanelOpen = typeof forceOpen === 'boolean' ? forceOpen : !importPanelOpen;
+      panel.classList.toggle('hidden', !importPanelOpen);
+      btn.textContent = importPanelOpen ? '收起导入' : 'Excel 导入';
+    }
+
+    function resetImportForm() {
+      selectedFile = null;
+      const fileInput = document.getElementById('fileInput');
+      if (fileInput) fileInput.value = '';
+      const fileName = document.getElementById('fileName');
+      if (fileName) {
+        fileName.textContent = '';
+        fileName.classList.add('hidden-text');
+      }
+      document.getElementById('uploadBtn').disabled = true;
+    }
+
+    function handleFile(file) {
+      if (!file) return;
+      if (!isAllowedImportFile(file)) return alert(`仅支持 ${IMPORT_FILE_LABEL}`);
+      selectedFile = file;
+      document.getElementById('fileName').textContent = '已选择：' + file.name;
+      document.getElementById('fileName').classList.remove('hidden-text');
+      document.getElementById('uploadBtn').disabled = false;
+    }
+
+    async function uploadFile() {
+      if (!selectedFile) return;
+      const btn = document.getElementById('uploadBtn');
+      btn.disabled = true;
+      btn.textContent = '导入中...';
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      try {
+        const res = await fetch('/api/alliance-orders/upload', { method: 'POST', body: formData, credentials: 'same-origin' });
+        const data = await res.json();
+        if (!res.ok) return alert(data.message || '导入失败');
+        let msg = data.message || `新增 ${data.inserted} 条，跳过重复 ${data.skipped} 条`;
+        if (data.duplicateKeys?.length) {
+          const preview = data.duplicateKeys.slice(0, 8).join('、');
+          const suffix = data.duplicateKeys.length > 8 ? ` 等 ${data.duplicateKeys.length} 项` : '';
+          msg += `\n\n重复的首列值：${preview}${suffix}`;
+        }
+        document.getElementById('importMessage').textContent = msg;
+        document.getElementById('importModal').classList.remove('hidden');
+      } catch {
+        alert('导入失败');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '开始导入';
+        resetImportForm();
+        toggleImportPanel(false);
+      }
+    }
+
+    function bindEvents() {
+      document.getElementById('toggleImportBtn').addEventListener('click', () => toggleImportPanel());
+      document.getElementById('cancelImportBtn').addEventListener('click', () => { resetImportForm(); toggleImportPanel(false); });
+      document.getElementById('dropZone').addEventListener('click', () => document.getElementById('fileInput').click());
+      document.getElementById('fileInput').addEventListener('change', (e) => handleFile(e.target.files[0]));
+      document.getElementById('uploadBtn').addEventListener('click', uploadFile);
+      document.getElementById('batchDeleteBtn').addEventListener('click', submitBatchDelete);
+      document.getElementById('searchBtn').addEventListener('click', () => { currentPage = 1; rowSelection.resetSelection(false); loadOrders(); });
+      document.getElementById('resetBtn').addEventListener('click', () => {
+        document.getElementById('filterContentId').value = '';
+        document.getElementById('filterCreatorUsername').value = '';
+        document.getElementById('filterImportTime').value = '';
+        document.getElementById('filterOrderId').value = '';
+        document.getElementById('filterPaymentFrom').value = '';
+        document.getElementById('filterPaymentTo').value = '';
+        urlAssignee = '';
+        urlPaymentAfterSample = '';
+        urlSampleDateFrom = '';
+        urlSampleDateTo = '';
+        urlPaymentFrom = '';
+        urlPaymentTo = '';
+        currentPage = 1;
+        rowSelection.resetSelection(false);
+        loadOrders();
+      });
+      document.getElementById('prevPageBtn').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadOrders(); } });
+      document.getElementById('nextPageBtn').addEventListener('click', () => { if (currentPage < totalPages) { currentPage++; loadOrders(); } });
+      document.getElementById('importCloseBtn').addEventListener('click', () => {
+        document.getElementById('importModal').classList.add('hidden');
+        currentPage = 1;
+        loadOrders();
+      });
+      ['filterContentId', 'filterCreatorUsername', 'filterOrderId'].forEach((id) => {
+        document.getElementById(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { currentPage = 1; rowSelection.resetSelection(false); loadOrders(); } });
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>

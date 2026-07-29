@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wiki - LUJIFO跨境电商ERP系统</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <script src="/js/common.js"></script>
+  <script>
+    function openEditWindow(id) {
+      const url = id ? `/wiki-edit.html?id=${id}` : '/wiki-edit.html';
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    let articlesCache = new Map();
+
+    async function init() {
+      await requireLogin();
+      renderShell({
+        active: 'wiki',
+        title: 'Wiki',
+        breadcrumb: '一级菜单 / <strong>Wiki</strong>',
+        meta: '知识库文章管理',
+        content: `
+          <div class="erp-page-header erp-page-header-row">
+            <div><h1 class="erp-page-title">Wiki 文章列表</h1><p class="erp-page-desc">支持新增、编辑、删除与富文本内容维护。新建/编辑在新窗口中打开。</p></div>
+            <button id="newArticleBtn" class="erp-btn erp-btn-primary">新建文章</button>
+          </div>
+          <div class="erp-card">
+            <div class="erp-table-wrap">
+              <table class="erp-table">
+                <thead><tr><th>标题</th><th>发布人</th><th>更新时间</th><th style="width:220px">操作</th></tr></thead>
+                <tbody id="articleTableBody"><tr><td colspan="4" class="erp-empty">加载中...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        `,
+      });
+      document.getElementById('newArticleBtn').addEventListener('click', () => openEditWindow());
+      window.addEventListener('message', (e) => {
+        if (e.data?.type === 'wiki-articles-changed') loadArticles();
+      });
+      document.getElementById('articleTableBody').addEventListener('click', (e) => {
+        const editBtn = e.target.closest('[data-edit]');
+        if (editBtn) {
+          e.preventDefault();
+          openEditWindow(editBtn.dataset.edit);
+          return;
+        }
+        const delBtn = e.target.closest('[data-del]');
+        if (delBtn) {
+          e.preventDefault();
+          deleteArticle(delBtn.dataset.del);
+        }
+      });
+      loadArticles();
+    }
+
+    async function loadArticles() {
+      const { res, data } = await api('/api/articles');
+      const tbody = document.getElementById('articleTableBody');
+      if (!res.ok || !data.data.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="erp-empty">暂无文章</td></tr>';
+        return;
+      }
+      articlesCache.clear();
+      tbody.innerHTML = data.data.map((item) => {
+        articlesCache.set(String(item.id), item);
+        return `
+        <tr>
+          <td><a href="/wiki-view.html?id=${item.id}" class="erp-link-external">${escapeHtml(item.title)}</a></td>
+          <td class="cell-muted">${escapeHtml(item.author || '-')}</td>
+          <td class="cell-muted">${formatDateTime(item.update_time)}</td>
+          <td>
+            <a href="/wiki-view.html?id=${item.id}" class="erp-btn erp-btn-secondary erp-btn-view">阅读</a>
+            <button type="button" class="erp-btn erp-btn-secondary erp-btn-view" data-edit="${item.id}">编辑</button>
+            ${isManager() ? `<button type="button" class="erp-btn erp-btn-danger erp-btn-view" data-del="${item.id}">删除</button>` : ''}
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function deleteArticle(id) {
+      const article = articlesCache.get(String(id));
+      const title = article?.title || '';
+      const label = title ? `「${title}」` : '这篇文章';
+      if (!confirm(`确定要删除${label}吗？此操作不可恢复。`)) return;
+
+      try {
+        const { res, data } = await api(`/api/articles/${id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          alert(data.message || '删除失败');
+          return;
+        }
+        loadArticles();
+      } catch (err) {
+        alert(err.message || '删除失败，请重试');
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

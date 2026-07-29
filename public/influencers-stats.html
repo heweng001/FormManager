@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>统计 - LUJIFO跨境电商ERP系统</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <script src="/js/common.js"></script>
+  <script>
+    let includeAllocationTag = false;
+    let periodLabels = {};
+
+    async function init() {
+      await requireLogin();
+      document.title = '统计 - LUJIFO跨境电商ERP系统';
+      renderShell({
+        active: 'influencers-stats',
+        breadcrumb: '一级菜单 / <strong>达人</strong> / <strong>统计</strong>',
+        meta: isManager() ? '各负责人关键数据汇总' : '我的关键数据汇总',
+        content: `
+          <div class="erp-page-header erp-page-header-compact">
+            <h1 class="erp-page-title erp-page-title-inline">统计<span class="erp-page-desc-inline"> — 按负责人汇总审核、寄样与联盟出单数据（北京时间）</span></h1>
+          </div>
+          <div class="erp-card erp-card-compact" style="margin-bottom:8px;">
+            <div class="erp-card-body erp-card-body-compact">
+              <div class="erp-toolbar erp-toolbar-compact">
+                <label class="erp-checkbox-label">
+                  <input type="checkbox" id="includeAllocationTag" />
+                  包含标签为「分配」的达人
+                </label>
+                <div class="erp-toolbar-spacer"></div>
+                <button id="refreshBtn" class="erp-btn erp-btn-primary">刷新</button>
+              </div>
+              <p id="statsFilterHint" class="erp-meta" style="margin-top:6px;">默认不包含标签为「分配」的达人。</p>
+            </div>
+          </div>
+          <div class="erp-card">
+            <div class="erp-table-wrap">
+              <table class="erp-table erp-table-stats" id="assigneeStatsTable">
+                <thead id="assigneeStatsHead">
+                  <tr><th>加载中...</th></tr>
+                </thead>
+                <tbody id="assigneeStatsBody">
+                  <tr><td class="erp-empty">加载中...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `,
+      });
+      bindEvents();
+      loadStats();
+    }
+
+    function bindEvents() {
+      document.getElementById('includeAllocationTag').addEventListener('change', (e) => {
+        includeAllocationTag = e.target.checked;
+        updateFilterHint();
+        loadStats();
+      });
+      document.getElementById('refreshBtn').addEventListener('click', loadStats);
+    }
+
+    function updateFilterHint() {
+      const hint = document.getElementById('statsFilterHint');
+      if (!hint) return;
+      hint.textContent = includeAllocationTag
+        ? '当前统计包含所有标签的达人（含「分配」）。'
+        : '默认不包含标签为「分配」的达人。';
+    }
+
+    const PERIOD_KEYS = ['year', 'last_month', 'current_month'];
+    const PERIOD_METRICS = [
+      { key: 'audit_approved', label: '通过', group: 'audit' },
+      { key: 'audit_rejected', label: '拒绝', group: 'audit' },
+      { key: 'audit_tentative', label: '待定', group: 'audit' },
+      { key: 'sample_count', label: '寄样数', group: 'sample' },
+      { key: 'ordered_influencer_count', label: '出单达人', group: 'alliance' },
+      { key: 'video_count', label: '出单视频', group: 'alliance' },
+      { key: 'order_count', label: '出单数', group: 'alliance' },
+      { key: 'refund_count', label: '退款数', group: 'alliance' },
+    ];
+
+    function renderTableHead(labels) {
+      const thead = document.getElementById('assigneeStatsHead');
+      const groupRow = `
+        <tr>
+          <th rowspan="2" class="cell-assignee-head">负责人</th>
+          ${PERIOD_KEYS.map((periodKey) => `<th colspan="${PERIOD_METRICS.length}" class="erp-stats-period-head">${escapeHtml(labels[periodKey] || periodKey)}</th>`).join('')}
+        </tr>`;
+      const metricRow = `
+        <tr>
+          ${PERIOD_KEYS.map(() => PERIOD_METRICS.map((metric) => `<th class="erp-stats-metric-head erp-stats-group-${metric.group}">${metric.label}</th>`).join('')).join('')}
+        </tr>`;
+      thead.innerHTML = groupRow + metricRow;
+    }
+
+    function renderMetricCell(value) {
+      return escapeHtml(String(value ?? 0));
+    }
+
+    function renderTableBody(rows) {
+      const tbody = document.getElementById('assigneeStatsBody');
+      const colCount = 1 + PERIOD_KEYS.length * PERIOD_METRICS.length;
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="${colCount}" class="erp-empty">暂无统计数据</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = rows.map((row) => `
+        <tr>
+          <td class="cell-assignee-name">${escapeHtml(row.assignee || '-')}</td>
+          ${PERIOD_KEYS.map((periodKey) => PERIOD_METRICS.map((metric) => `<td class="erp-stats-value erp-stats-group-${metric.group}">${renderMetricCell(row[periodKey]?.[metric.key])}</td>`).join('')).join('')}
+        </tr>
+      `).join('');
+    }
+
+    async function loadStats() {
+      const tbody = document.getElementById('assigneeStatsBody');
+      const colCount = 1 + PERIOD_KEYS.length * PERIOD_METRICS.length;
+      tbody.innerHTML = `<tr><td colspan="${colCount}" class="erp-empty">加载中...</td></tr>`;
+
+      const params = new URLSearchParams();
+      if (includeAllocationTag) params.set('include_allocation_tag', '1');
+      const { res, data } = await api(`/api/assignee-stats?${params.toString()}`);
+
+      if (!res.ok) {
+        tbody.innerHTML = `<tr><td colspan="${colCount}" class="erp-empty">${escapeHtml(data.message || '加载失败')}</td></tr>`;
+        return;
+      }
+
+      periodLabels = data.period_labels || {};
+      renderTableHead(periodLabels);
+      renderTableBody(data.rows || []);
+      updateFilterHint();
+    }
+
+    init();
+  </script>
+</body>
+</html>

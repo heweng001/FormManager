@@ -1,0 +1,1872 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+
+<head>
+
+  <meta charset="UTF-8" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>已合作 - LUJIFO跨境电商ERP系统</title>
+
+  <link rel="stylesheet" href="/styles.css" />
+
+</head>
+
+<body>
+
+  <script src="/js/common.js"></script>
+
+  <script>
+
+    const PAGE_SIZE = 50;
+
+    const saveTimers = new Map();
+
+    const recordsCache = new Map();
+
+    let currentPage = 1;
+
+    let totalPages = 1;
+
+    let lastLoadedRows = [];
+
+    let lastTotal = 0;
+
+    let staffOptions = [];
+
+    let selectedIds = new Set();
+
+    let allResultsSelected = false;
+
+    let sortField = 'order_count';
+
+    let sortOrder = 'desc';
+
+    let applyPinSort = true;
+
+    let currentTab = 'recent_sample';
+
+    let urlOrderedAfterSample = '';
+    let urlSampleDateFrom = '';
+    let urlSampleDateTo = '';
+    let urlAssignee = '';
+
+    function getColumnCount() {
+
+      return 12;
+
+    }
+
+
+
+    async function init() {
+
+      await requireLogin();
+
+      renderShell({
+
+        active: 'influencers-collaborated',
+
+        breadcrumb: '一级菜单 / <strong>达人</strong> / <strong>已合作</strong>',
+
+        meta: isManager() ? '联盟订单数据统计' : '我的负责达人 · 已合作',
+
+        content: `
+
+          <div class="erp-page-header erp-page-header-compact">
+
+            <h1 class="erp-page-title erp-page-title-inline">已合作<span class="erp-page-desc-inline"> — 汇总联盟订单全部日期的出单视频数、出单数、退款数</span></h1>
+
+          </div>
+
+          <div class="erp-card erp-card-compact" style="margin-bottom:8px;">
+
+            <div class="erp-card-body erp-card-body-compact">
+
+              <div class="erp-toolbar erp-toolbar-compact">
+
+                <div class="erp-field"><label>达人 id</label><input id="filterInfluencerId" class="erp-input" placeholder="关键词" autocomplete="off" readonly /></div>
+
+                <div class="erp-field"><label>标签</label><select id="filterTags" class="erp-input"><option value="">全部</option></select></div>
+
+                <div class="erp-field"><label>履约进展</label><select id="filterFulfillment" class="erp-input"><option value="">全部</option></select></div>
+
+                <div class="erp-field"><label>寄样日期</label><select id="filterSampleDate" class="erp-input"><option value="">全部</option></select></div>
+
+                ${isManager() ? '<div class="erp-field"><label>负责人</label><select id="filterAssignee" class="erp-input"><option value="">全部</option></select></div>' : ''}
+
+                <button id="searchBtn" class="erp-btn erp-btn-primary">查询</button>
+
+                <button id="resetBtn" class="erp-btn erp-btn-secondary">重置</button>
+
+                <button id="batchTagsBtn" class="erp-btn erp-btn-secondary">批量设置标签</button>
+
+                <button id="scrapeEmailBtn" class="erp-btn erp-btn-secondary">抓取邮箱</button>
+
+                <button id="myMailSettingsBtn" class="erp-btn erp-btn-secondary">我的邮箱</button>
+
+                <button id="batchEmailBtn" class="erp-btn erp-btn-secondary">群发邮件</button>
+
+                ${isManager() ? '<div class="erp-toolbar-spacer"></div><button id="batchAssignBtn" class="erp-btn erp-btn-secondary">分配负责人</button>' : ''}
+
+              </div>
+
+            </div>
+
+          </div>
+
+          <div class="erp-card">
+
+            <div class="erp-tabs" id="collabTabs">
+
+              <button class="erp-tab" data-tab="all">全部 <span class="erp-tab-count" id="countAll">0</span></button>
+
+              <button class="erp-tab active" data-tab="recent_sample">最近寄样 <span class="erp-tab-count" id="countRecentSample">0</span></button>
+
+              <button class="erp-tab" data-tab="ordered">已出单 <span class="erp-tab-count" id="countOrdered">0</span></button>
+
+              <button class="erp-tab" data-tab="no_order">未出单 <span class="erp-tab-count" id="countNoOrder">0</span></button>
+
+            </div>
+
+            <div class="erp-collab-tab-hint" id="collabTabHint"></div>
+
+            <div class="erp-table-wrap">
+
+              <table class="erp-table erp-table-collab">
+
+                <thead><tr>
+
+                  <th class="cell-checkbox">
+
+                    <div class="erp-select-all-wrap" id="selectAllWrap">
+
+                      <input type="checkbox" id="selectAllCheckbox" title="批量选择" />
+
+                      <div id="selectAllMenu" class="erp-select-all-menu hidden">
+
+                        <button type="button" id="selectPageBtn">选中本页 <span id="selectPageCount">0</span> 行</button>
+
+                        <button type="button" id="selectAllBtn">选中所有搜索结果 <span id="selectAllCount">0</span> 行</button>
+
+                        <button type="button" id="selectClearBtn">取消选择</button>
+
+                      </div>
+
+                    </div>
+
+                  </th>
+
+                  <th class="cell-id">达人id</th><th class="cell-fulfillment">履约进展</th><th class="cell-tags">标签</th><th class="cell-assignee">负责人</th>
+
+                  <th class="erp-sortable cell-video-count" data-sort="video_count">出单视频数 <span class="erp-sort-indicator" data-field="video_count">↕</span></th>
+
+                  <th class="erp-sortable cell-order-count" data-sort="order_count">出单数 <span class="erp-sort-indicator" data-field="order_count">↕</span></th>
+
+                  <th class="erp-sortable cell-refund-count" data-sort="refund_count">退款数 <span class="erp-sort-indicator" data-field="refund_count">↕</span></th>
+
+                  <th class="cell-remark-head">达人备注</th>
+
+                  <th class="cell-follow-up">跟进记录</th>
+
+                  <th class="erp-sortable cell-sample-date" data-sort="sample_date">寄样日期 <span class="erp-sort-indicator" data-field="sample_date">↕</span></th>
+
+                  <th class="cell-action">操作</th>
+
+                </tr></thead>
+
+                <tbody id="statsTableBody"><tr><td colspan="${getColumnCount()}" class="erp-empty">加载中...</td></tr></tbody>
+
+              </table>
+
+            </div>
+
+            <div class="erp-pagination">
+
+              <span id="pageInfo">第 1 / 1 页，共 0 条</span>
+
+              <div class="erp-pagination-actions">
+
+                <button id="prevPageBtn" class="erp-btn erp-btn-secondary" disabled>上一页</button>
+
+                <button id="nextPageBtn" class="erp-btn erp-btn-secondary" disabled>下一页</button>
+
+              </div>
+
+            </div>
+
+          </div>
+
+          <div id="detailModal" class="erp-modal-overlay hidden">
+
+            <div class="erp-modal erp-modal-wide">
+
+              <div class="erp-modal-header">达人详情</div>
+
+              <div class="erp-modal-body">
+                <div class="erp-tabs erp-detail-modal-tabs" id="influencerDetailTabs">
+                  <button type="button" class="erp-tab active" data-tab="audit">审核信息</button>
+                  <button type="button" class="erp-tab" data-tab="collab">合作信息</button>
+                  <button type="button" class="erp-tab" data-tab="followup">跟进记录</button>
+                </div>
+                <div id="detailAuditContent" class="erp-detail-stack"></div>
+                <div id="detailCollabContent" class="erp-detail-grid hidden"></div>
+                <div id="detailFollowUpContent" class="erp-detail-followup hidden"></div>
+              </div>
+
+              <div class="erp-modal-footer"><button id="detailCloseBtn" class="erp-btn erp-btn-primary">关闭</button></div>
+
+            </div>
+
+          </div>
+
+          <div id="trendModal" class="erp-modal-overlay erp-trend-modal hidden">
+            <div class="erp-modal">
+              <div class="erp-modal-header">月度出单对比</div>
+              <div class="erp-modal-body erp-trend-modal-body">
+                <p id="trendModalMeta" class="erp-meta erp-trend-meta"></p>
+                <table class="erp-table erp-trend-table" id="trendStatsTable">
+                  <thead>
+                    <tr>
+                      <th>指标</th>
+                      <th>出单视频数</th>
+                      <th>出单数</th>
+                      <th>退款数</th>
+                    </tr>
+                  </thead>
+                  <tbody id="trendStatsBody"><tr><td colspan="4" class="erp-empty">加载中...</td></tr></tbody>
+                </table>
+              </div>
+              <div class="erp-modal-footer"><button id="trendCloseBtn" class="erp-btn erp-btn-primary">关闭</button></div>
+            </div>
+          </div>
+
+          ${isManager() ? `
+
+          <div id="batchAssignModal" class="erp-modal-overlay hidden">
+
+            <div class="erp-modal">
+
+              <div class="erp-modal-header">分配负责人</div>
+
+              <div class="erp-modal-body">
+
+                <p id="batchAssignHint" class="erp-meta" style="margin-bottom:10px;">将分配 0 位达人</p>
+
+                <div class="erp-form-field">
+
+                  <label>负责人（可多选，将平均分配）</label>
+
+                  <div id="batchAssigneeList" class="erp-checkbox-list"></div>
+
+                </div>
+
+              </div>
+
+              <div class="erp-modal-footer">
+
+                <button class="erp-btn erp-btn-secondary" id="cancelBatchAssignBtn">取消</button>
+
+                <button class="erp-btn erp-btn-primary" id="confirmBatchAssignBtn">确认分配</button>
+
+              </div>
+
+            </div>
+
+          </div>` : ''}
+
+          <div id="batchTagsModal" class="erp-modal-overlay hidden">
+            <div class="erp-modal">
+              <div class="erp-modal-header">批量设置标签</div>
+              <div class="erp-modal-body">
+                <p id="batchTagsHint" class="erp-meta" style="margin-bottom:10px;">已选 0 位达人</p>
+                <div class="erp-form-field">
+                  <label>操作方式</label>
+                  <select id="batchTagsMode" class="erp-input">
+                    <option value="replace">替换为</option>
+                    <option value="add">追加</option>
+                    <option value="remove">移除</option>
+                  </select>
+                </div>
+                <div class="erp-form-field">
+                  <label>标签（多个用逗号分隔）</label>
+                  <input id="batchTagsInput" class="erp-input" type="text" placeholder="例如：分配,重点" />
+                  <p class="erp-meta" style="margin-top:6px;">「替换为」留空可清空标签；同一达人的全部申请将同步更新。</p>
+                </div>
+              </div>
+              <div class="erp-modal-footer">
+                <button class="erp-btn erp-btn-secondary" id="cancelBatchTagsBtn">取消</button>
+                <button class="erp-btn erp-btn-primary" id="confirmBatchTagsBtn">确认</button>
+              </div>
+            </div>
+          </div>
+
+          ${renderStaffMailModalsHtml()}
+
+        `,
+
+      });
+
+      bindEvents();
+
+      bindInfluencerDetailModal();
+
+      setupSelectAllMenu();
+
+      setupFilterAutofillGuard('filterInfluencerId');
+
+      initCollaboratedStaticFilters();
+
+      applyFiltersFromUrl();
+
+      await loadFilterOptions();
+
+      loadStats();
+
+    }
+
+
+
+    const COLLAB_TAB_HINTS = {
+      recent_sample: '最近寄样：寄样日期在最近 15 天内',
+      ordered: '已出单：寄样日期超过 15 天，且出单数不为 0',
+      no_order: '未出单：寄样日期超过 15 天，且出单数为 0',
+    };
+
+    function updateCollabTabHint() {
+      const el = document.getElementById('collabTabHint');
+      if (!el) return;
+      const hint = COLLAB_TAB_HINTS[currentTab];
+      if (hint) {
+        el.textContent = hint;
+        el.classList.remove('hidden');
+      } else {
+        el.textContent = '';
+        el.classList.add('hidden');
+      }
+    }
+
+    function applyFiltersFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const collabTab = params.get('collab_tab');
+      if (collabTab && ['all', 'recent_sample', 'ordered', 'no_order'].includes(collabTab)) {
+        currentTab = collabTab;
+        document.querySelectorAll('#collabTabs .erp-tab').forEach((el) => {
+          el.classList.toggle('active', el.dataset.tab === currentTab);
+        });
+      }
+      const assignee = params.get('assignee');
+      urlAssignee = assignee || '';
+      if (urlAssignee && document.getElementById('filterAssignee')) {
+        document.getElementById('filterAssignee').value = urlAssignee;
+      }
+      urlOrderedAfterSample = params.get('ordered_after_sample') === '1' ? '1' : '';
+      urlSampleDateFrom = params.get('sample_date_from') || '';
+      urlSampleDateTo = params.get('sample_date_to') || '';
+      updateCollabTabHint();
+    }
+
+    function getFilters() {
+
+      return {
+
+        influencer_id: document.getElementById('filterInfluencerId').value.trim(),
+
+        tags: document.getElementById('filterTags').value.trim(),
+
+        fulfillment_progress: document.getElementById('filterFulfillment').value.trim(),
+
+        sample_date: document.getElementById('filterSampleDate').value.trim(),
+
+        assignee: urlAssignee || (isManager() ? (document.getElementById('filterAssignee')?.value.trim() || '') : ''),
+
+        ordered_after_sample: urlOrderedAfterSample,
+
+        sample_date_from: urlSampleDateFrom,
+
+        sample_date_to: urlSampleDateTo,
+
+        collab_tab: currentTab,
+
+        sort_field: sortField,
+
+        sort_order: sortOrder,
+
+        apply_pin: applyPinSort ? 1 : 0,
+
+        page: currentPage,
+
+        pageSize: PAGE_SIZE,
+
+      };
+
+    }
+
+
+
+    function getBatchFilters() {
+
+      const { page, pageSize, ...filters } = getFilters();
+
+      return filters;
+
+    }
+
+
+
+    function buildQueryString(filters) {
+
+      const params = new URLSearchParams();
+
+      Object.entries(filters).forEach(([k, v]) => {
+        if (v !== '' && v != null) params.set(k, String(v));
+      });
+
+      const q = params.toString();
+
+      return q ? `?${q}` : '';
+
+    }
+
+
+
+    function renderInfluencerLink(id) {
+
+      const text = escapeHtml(id || '-');
+
+      if (!id) return text;
+
+      return `<a href="https://www.tiktok.com/@${encodeURIComponent(id)}?shop_region=US" target="_blank" rel="noopener noreferrer" class="erp-link-external">${text}</a>`;
+
+    }
+
+
+
+    function getTagsCellHandlers() {
+
+      return {
+
+        getTagsForInfluencer(influencerId) {
+
+          return parseTagsList(recordsCache.get(String(influencerId))?.tags);
+
+        },
+
+        async saveTagsForInfluencer(influencerId, tags) {
+
+          const value = joinTagsList(tags);
+
+          const { res, data } = await api(`/api/influencer-profiles/${encodeURIComponent(influencerId)}`, {
+
+            method: 'PATCH',
+
+            body: JSON.stringify({ tags: value }),
+
+          });
+
+          if (!res.ok) {
+
+            alert(data.message || '标签保存失败');
+
+            return false;
+
+          }
+
+          const cached = recordsCache.get(String(influencerId));
+
+          if (cached) cached.tags = value;
+
+          return true;
+
+        },
+
+        onAfterSave() {
+
+          setTimeout(() => loadFilterOptions(), 200);
+
+        },
+
+      };
+
+    }
+
+
+
+    function bindTagsCells() {
+
+      bindInfluencerTagsCells(getTagsCellHandlers());
+
+    }
+
+
+
+    function renderRemarkInput(influencerId, value) {
+
+      const text = String(value || '').trim();
+
+      return `<div class="erp-editable-wrap"><input type="text" class="erp-editable editable-remark" data-influencer-id="${escapeAttr(influencerId)}" value="${escapeAttr(value || '')}" title="${escapeAttr(text)}" /><span class="erp-save-status save-status hidden"></span></div>`;
+
+    }
+
+
+
+    function renderFulfillmentSelect(influencerId, value) {
+      return renderFulfillmentProgressSelect(influencerId, value);
+    }
+
+
+
+    function renderOrderCountCell(row) {
+
+      const key = String(row.influencer_id || '').trim();
+
+      const count = Number(row.order_count) || 0;
+
+      const text = String(count);
+
+      if (!key) return escapeHtml(text);
+
+      const href = `/alliance-orders.html?creator_username=${encodeURIComponent(key)}`;
+
+      return `<a href="${escapeAttr(href)}" class="erp-link-external order-count-link">${escapeHtml(text)}</a>`;
+
+    }
+
+
+
+    function renderTrendMetricCells(metrics, picker) {
+
+      const keys = ['video_count', 'order_count', 'refund_count'];
+
+      return keys.map((key) => `<td>${picker(metrics[key])}</td>`).join('');
+
+    }
+
+
+
+    function renderTrendTableBody(stats) {
+
+      const metrics = stats.metrics || {};
+
+      const rows = [
+
+        ['历史总计', (metric) => escapeHtml(String(metric?.total ?? 0))],
+
+        ['上月', (metric) => escapeHtml(String(metric?.last_month ?? 0))],
+
+        ['本月', (metric) => escapeHtml(String(metric?.current_month ?? 0))],
+
+        ['环比', (metric) => formatTrendPct(metric?.change_pct)],
+
+      ];
+
+      return rows.map(([label, picker]) => `
+
+        <tr>
+
+          <td>${escapeHtml(label)}</td>
+
+          ${renderTrendMetricCells(metrics, picker)}
+
+        </tr>
+
+      `).join('');
+
+    }
+
+
+
+    function isRowChecked(influencerId) {
+
+      return allResultsSelected || selectedIds.has(String(influencerId));
+
+    }
+
+
+
+    function renderCollaboratedInfluencerIdCell(row) {
+
+      const id = row.influencer_id;
+
+      const key = String(id || '');
+
+      const linkHtml = renderInfluencerLink(id);
+
+      const trendBtn = `<button type="button" class="erp-trend-btn" data-influencer-id="${escapeAttr(key)}" title="月度出单对比" aria-label="月度出单对比"><span class="erp-trend-icon" aria-hidden="true"></span></button>`;
+
+      return `<span class="erp-influencer-id-wrap"><span class="erp-influencer-id-cell">${linkHtml}${trendBtn}${renderPinButton(id, row.pinned)}</span>${renderInfluencerEmailInline(key, row.email, row)}</span>`;
+
+    }
+
+
+
+    function formatTrendPct(pct) {
+
+      const num = Number(pct) || 0;
+
+      if (num > 0) return `<span class="erp-trend-pct up">+${num.toFixed(1)}%</span>`;
+
+      if (num < 0) return `<span class="erp-trend-pct down">${num.toFixed(1)}%</span>`;
+
+      return `<span class="erp-trend-pct flat">0.0%</span>`;
+
+    }
+
+
+
+    async function openTrendModal(influencerId) {
+
+      const modal = document.getElementById('trendModal');
+
+      const body = document.getElementById('trendStatsBody');
+
+      const meta = document.getElementById('trendModalMeta');
+
+      if (!modal || !body) return;
+
+      meta.textContent = `达人 id：${influencerId}`;
+
+      body.innerHTML = '<tr><td colspan="4" class="erp-empty">统计中...</td></tr>';
+
+      modal.classList.remove('hidden');
+
+      const { res, data } = await api(`/api/collaborated/monthly-stats/${encodeURIComponent(influencerId)}`);
+
+      if (!res.ok) {
+
+        body.innerHTML = `<tr><td colspan="4" class="erp-empty">${escapeHtml(data.message || '加载失败')}</td></tr>`;
+
+        return;
+
+      }
+
+      const stats = data.data;
+
+      meta.textContent = `达人 id：${influencerId}（${stats.last_month_label || '上月'} vs ${stats.current_month_label || '本月'}）`;
+
+      body.innerHTML = renderTrendTableBody(stats);
+
+    }
+
+
+
+    function refundRateAlertClass(row) {
+
+      const orders = Number(row.order_count) || 0;
+
+      const refunds = Number(row.refund_count) || 0;
+
+      if (orders <= 0) return '';
+
+      const rate = refunds / orders;
+
+      if (rate > 0.3) return 'erp-cell-alert';
+
+      if (rate > 0.1) return 'erp-cell-warning';
+
+      return '';
+
+    }
+
+
+
+    function renderFollowUpCell(row) {
+      const key = String(row.influencer_id || '');
+      const count = Number(row.follow_up_count) || 0;
+      const latest = String(row.latest_follow_up || '').trim();
+      const latestAt = String(row.latest_follow_up_at || '').trim();
+      const dateLabel = latestAt ? formatDateTime(latestAt).split(' ')[0] : '';
+      const openBtn = (className, label, title = '') =>
+        `<button type="button" class="erp-follow-up-open ${className}" data-influencer-id="${escapeAttr(key)}"${title ? ` title="${escapeAttr(title)}"` : ''}>${label}</button>`;
+      if (!count) {
+        return `<div class="erp-follow-up-cell">${openBtn('erp-follow-up-empty', '暂无', '查看跟进记录')}</div>`;
+      }
+      const preview = latest.length > 36 ? `${latest.slice(0, 36)}…` : latest;
+      const datePart = dateLabel
+        ? `<span class="erp-follow-up-date">${escapeHtml(dateLabel)}</span><span class="erp-follow-up-sep" aria-hidden="true">·</span>`
+        : '';
+      return `
+        <div class="erp-follow-up-cell">
+          ${datePart}${openBtn('erp-follow-up-preview', escapeHtml(preview || '-'), latest)}<span class="erp-follow-up-sep" aria-hidden="true">·</span>${openBtn('erp-follow-up-count', `${count} 条`, '查看全部跟进记录')}
+        </div>
+      `;
+    }
+
+
+
+    function renderStatsRow(row) {
+
+      const key = String(row.influencer_id || '');
+
+      recordsCache.set(key, row);
+
+      const checked = isRowChecked(key) ? 'checked' : '';
+
+      const checkboxCell = `<td class="cell-checkbox"><input type="checkbox" class="row-checkbox" data-influencer-id="${escapeAttr(key)}" ${checked} /></td>`;
+
+      const detailBtn = `<button type="button" class="erp-btn erp-btn-secondary erp-btn-view view-influencer-detail-btn" data-record-id="${row.record_id || ''}" data-influencer-id="${escapeAttr(key)}">查看</button>`;
+
+      return `<tr class="stats-row" data-influencer="${escapeAttr(key)}">
+
+        ${checkboxCell}
+
+        <td class="cell-id">${renderCollaboratedInfluencerIdCell(row)}</td>
+
+        <td class="cell-fulfillment">${renderFulfillmentSelect(key, row.fulfillment_progress)}</td>
+
+        <td class="cell-tags">${renderTagsCell(key, row.tags)}</td>
+
+        <td class="cell-assignee${row.assignee_conflict ? ' assignee-conflict' : ''}" title="${escapeAttr(row.assignee_conflict && row.assignee_names?.length ? row.assignee_names.join('、') : (row.assignee || ''))}">${escapeHtml(row.assignee || '-')}</td>
+
+        <td class="cell-video-count">${escapeHtml(String(row.video_count ?? 0))}</td>
+
+        <td class="cell-order-count">${renderOrderCountCell(row)}</td>
+
+        <td class="cell-refund-count ${refundRateAlertClass(row)}">${escapeHtml(String(row.refund_count ?? 0))}</td>
+
+        <td class="cell-remark">${renderRemarkInput(key, row.influencer_remark)}</td>
+
+        <td class="cell-follow-up">${renderFollowUpCell(row)}</td>
+
+        <td class="cell-sample-date">${renderSampleDateListCell(row)}</td>
+
+        <td class="cell-action">${detailBtn}</td>
+
+      </tr>`;
+
+    }
+
+
+
+    function resetSelection(clearAllResults = true) {
+
+      if (clearAllResults) allResultsSelected = false;
+
+      selectedIds.clear();
+
+      syncHeaderCheckbox();
+
+    }
+
+
+
+    function getSelectedCount() {
+
+      return allResultsSelected ? lastTotal : selectedIds.size;
+
+    }
+
+
+
+    function updateSelectAllMenuCounts() {
+
+      const pageCountEl = document.getElementById('selectPageCount');
+
+      const allCountEl = document.getElementById('selectAllCount');
+
+      if (pageCountEl) pageCountEl.textContent = lastLoadedRows.length;
+
+      if (allCountEl) allCountEl.textContent = lastTotal;
+
+    }
+
+
+
+    function openSelectAllMenu() {
+
+      const menu = document.getElementById('selectAllMenu');
+
+      if (!menu) return;
+
+      updateSelectAllMenuCounts();
+
+      menu.classList.remove('hidden');
+
+    }
+
+
+
+    function closeSelectAllMenu() {
+
+      document.getElementById('selectAllMenu')?.classList.add('hidden');
+
+    }
+
+
+
+    function toggleSelectAllMenu() {
+
+      const menu = document.getElementById('selectAllMenu');
+
+      if (!menu) return;
+
+      if (menu.classList.contains('hidden')) openSelectAllMenu();
+
+      else closeSelectAllMenu();
+
+    }
+
+
+
+    function selectCurrentPage() {
+
+      if (!lastLoadedRows.length) return alert('当前页没有可选择的记录');
+
+      allResultsSelected = false;
+
+      selectedIds = new Set(lastLoadedRows.map((item) => String(item.influencer_id)));
+
+      syncRowCheckboxes();
+
+      closeSelectAllMenu();
+
+    }
+
+
+
+    function selectAllResults() {
+
+      if (!lastTotal) return alert('当前没有可选择的记录');
+
+      allResultsSelected = true;
+
+      selectedIds.clear();
+
+      syncRowCheckboxes();
+
+      closeSelectAllMenu();
+
+    }
+
+
+
+    function clearSelection() {
+
+      resetSelection(false);
+
+      syncRowCheckboxes();
+
+      closeSelectAllMenu();
+
+    }
+
+
+
+    function setupSelectAllMenu() {
+
+      const checkbox = document.getElementById('selectAllCheckbox');
+
+      const wrap = document.getElementById('selectAllWrap');
+
+      if (!checkbox || !wrap) return;
+
+
+
+      checkbox.addEventListener('mousedown', (e) => e.preventDefault());
+
+      checkbox.addEventListener('click', (e) => {
+
+        e.preventDefault();
+
+        e.stopPropagation();
+
+        toggleSelectAllMenu();
+
+      });
+
+
+
+      document.getElementById('selectPageBtn')?.addEventListener('click', (e) => {
+
+        e.stopPropagation();
+
+        selectCurrentPage();
+
+      });
+
+      document.getElementById('selectAllBtn')?.addEventListener('click', (e) => {
+
+        e.stopPropagation();
+
+        selectAllResults();
+
+      });
+
+      document.getElementById('selectClearBtn')?.addEventListener('click', (e) => {
+
+        e.stopPropagation();
+
+        clearSelection();
+
+      });
+
+
+
+      document.addEventListener('click', (e) => {
+
+        if (!wrap.contains(e.target)) closeSelectAllMenu();
+
+      });
+
+    }
+
+
+
+    function syncHeaderCheckbox() {
+
+      const header = document.getElementById('selectAllCheckbox');
+
+      if (!header) return;
+
+      if (!lastLoadedRows.length) {
+
+        header.checked = false;
+
+        header.indeterminate = false;
+
+        return;
+
+      }
+
+      if (allResultsSelected) {
+
+        header.checked = true;
+
+        header.indeterminate = false;
+
+        return;
+
+      }
+
+      const pageIds = lastLoadedRows.map((row) => String(row.influencer_id));
+
+      const selectedOnPage = pageIds.filter((id) => selectedIds.has(id)).length;
+
+      header.checked = selectedOnPage > 0 && selectedOnPage === pageIds.length;
+
+      header.indeterminate = selectedOnPage > 0 && selectedOnPage < pageIds.length;
+
+    }
+
+
+
+    function syncRowCheckboxes() {
+
+      document.querySelectorAll('.row-checkbox').forEach((box) => {
+
+        box.checked = isRowChecked(box.dataset.influencerId);
+
+      });
+
+      syncHeaderCheckbox();
+
+    }
+
+
+
+    function updateSortIndicators() {
+
+      document.querySelectorAll('.erp-sort-indicator').forEach((el) => {
+
+        const field = el.dataset.field;
+
+        const active = field === sortField;
+
+        el.textContent = active ? (sortOrder === 'asc' ? '↑' : '↓') : '↕';
+
+        el.classList.toggle('active', active);
+
+      });
+
+    }
+
+
+
+    function toggleSort(field) {
+
+      applyPinSort = false;
+
+      if (sortField === field) sortOrder = sortOrder === 'desc' ? 'asc' : 'desc';
+
+      else {
+
+        sortField = field;
+
+        sortOrder = 'desc';
+
+      }
+
+      currentPage = 1;
+
+      loadStats();
+
+    }
+
+
+
+    async function saveRemarkForInfluencer(influencerId, influencerRemark) {
+
+      const { res, data } = await api(`/api/influencer-profiles/${encodeURIComponent(influencerId)}`, {
+
+        method: 'PATCH',
+
+        body: JSON.stringify({ influencer_remark: influencerRemark }),
+
+      });
+
+      if (!res.ok) {
+
+        alert(data.message || '达人备注保存失败');
+
+        return false;
+
+      }
+
+      const cached = recordsCache.get(String(influencerId));
+
+      if (cached) cached.influencer_remark = influencerRemark;
+
+      return true;
+
+    }
+
+
+
+    function bindRemarkFields() {
+
+      document.querySelectorAll('.editable-remark').forEach((input) => {
+
+        input.dataset.lastSaved = input.value.trim();
+
+        input.addEventListener('input', () => scheduleRemarkSave(input));
+
+        input.addEventListener('blur', () => {
+
+          input.title = input.value.trim();
+
+          saveRemarkField(input);
+
+        });
+
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
+
+      });
+
+    }
+
+
+
+    function bindFulfillmentSelects() {
+      document.querySelectorAll('.fulfillment-select').forEach((select) => {
+        applyFulfillmentSelectTone(select);
+        select.dataset.lastSaved = select.value;
+        select.addEventListener('change', async () => {
+          const influencerId = select.dataset.influencerId;
+          const value = select.value.trim();
+          applyFulfillmentSelectTone(select);
+          if (select.dataset.lastSaved === value) return;
+          const { res, data } = await api(`/api/influencer-profiles/${encodeURIComponent(influencerId)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ fulfillment_progress: value }),
+          });
+          if (!res.ok) {
+            alert(data.message || '履约进展保存失败');
+            select.value = select.dataset.lastSaved || '';
+            applyFulfillmentSelectTone(select);
+            return;
+          }
+          select.dataset.lastSaved = value;
+          const cached = recordsCache.get(String(influencerId));
+          if (cached) cached.fulfillment_progress = value;
+        });
+      });
+    }
+
+
+
+    function scheduleRemarkSave(input) {
+
+      const timerKey = `remark-${input.dataset.influencerId}`;
+
+      if (saveTimers.has(timerKey)) clearTimeout(saveTimers.get(timerKey));
+
+      saveTimers.set(timerKey, setTimeout(() => {
+
+        saveTimers.delete(timerKey);
+
+        saveRemarkField(input);
+
+      }, 600));
+
+    }
+
+
+
+    async function saveRemarkField(input) {
+
+      const timerKey = `remark-${input.dataset.influencerId}`;
+
+      if (saveTimers.has(timerKey)) {
+
+        clearTimeout(saveTimers.get(timerKey));
+
+        saveTimers.delete(timerKey);
+
+      }
+
+      const value = input.value.trim();
+
+      if (input.dataset.lastSaved === value) return;
+
+      const ok = await saveRemarkForInfluencer(input.dataset.influencerId, value);
+
+      if (!ok) return;
+
+      input.dataset.lastSaved = value;
+
+      input.title = value;
+
+    }
+
+
+
+    function bindRowCheckboxEvents() {
+
+      document.querySelectorAll('.row-checkbox').forEach((box) => {
+
+        box.addEventListener('change', () => {
+
+          const id = String(box.dataset.influencerId);
+
+          if (allResultsSelected) {
+
+            allResultsSelected = false;
+
+            selectedIds = new Set(lastLoadedRows.map((item) => String(item.influencer_id)));
+
+          }
+
+          if (box.checked) selectedIds.add(id);
+
+          else selectedIds.delete(id);
+
+          syncHeaderCheckbox();
+
+        });
+
+      });
+
+    }
+
+
+
+    function initCollaboratedStaticFilters() {
+
+      const fulfillmentSelect = document.getElementById('filterFulfillment');
+
+      fulfillmentSelect.innerHTML = '<option value="">全部</option><option value="__empty__">（空）</option>';
+
+      FULFILLMENT_PROGRESS_OPTIONS.forEach((item) => {
+
+        fulfillmentSelect.innerHTML += `<option value="${escapeAttr(item)}">${escapeHtml(item)}</option>`;
+
+      });
+
+
+
+      const sampleDateSelect = document.getElementById('filterSampleDate');
+
+      sampleDateSelect.innerHTML = `
+
+        <option value="">全部</option>
+
+        <option value="has">有寄样日期</option>
+
+        <option value="__empty__">无寄样日期</option>
+
+        <option value="recent_15d">最近15天</option>
+
+        <option value="older_15d">15天以前</option>
+
+      `;
+
+    }
+
+
+
+    async function loadFilterOptions() {
+
+      const { res, data } = await api('/api/collaborated/filter-options');
+
+      if (!res.ok) return;
+
+
+
+      const tagsSelect = document.getElementById('filterTags');
+
+      const tagsCurrent = tagsSelect.value;
+
+      tagsSelect.innerHTML = '<option value="">全部</option>';
+
+      if (data.has_empty_tags) tagsSelect.innerHTML += '<option value="__empty__">（空）</option>';
+
+      (data.tags || []).forEach((tag) => {
+
+        tagsSelect.innerHTML += `<option value="${escapeAttr(tag)}">${escapeHtml(tag)}</option>`;
+
+      });
+
+      if ([...tagsSelect.options].some((opt) => opt.value === tagsCurrent)) tagsSelect.value = tagsCurrent;
+
+
+
+      const assigneeSelect = document.getElementById('filterAssignee');
+
+      if (!assigneeSelect) return;
+
+      const assigneeCurrent = assigneeSelect.value;
+
+      assigneeSelect.innerHTML = '<option value="">全部</option>';
+
+      if (data.has_empty_assignee) assigneeSelect.innerHTML += '<option value="__empty__">（空）</option>';
+
+      if (data.has_assignee_conflict) assigneeSelect.innerHTML += '<option value="__conflict__">冲突</option>';
+
+      (data.assignees || []).forEach((name) => {
+
+        assigneeSelect.innerHTML += `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`;
+
+      });
+
+      if ([...assigneeSelect.options].some((opt) => opt.value === assigneeCurrent)) {
+        assigneeSelect.value = assigneeCurrent;
+      } else if (urlAssignee && [...assigneeSelect.options].some((opt) => opt.value === urlAssignee)) {
+        assigneeSelect.value = urlAssignee;
+      }
+
+    }
+
+
+
+    function updateTabCounts(tabCounts) {
+
+      document.getElementById('countAll').textContent = tabCounts?.all ?? 0;
+
+      document.getElementById('countRecentSample').textContent = tabCounts?.recent_sample ?? 0;
+
+      document.getElementById('countOrdered').textContent = tabCounts?.ordered ?? 0;
+
+      document.getElementById('countNoOrder').textContent = tabCounts?.no_order ?? 0;
+
+    }
+
+
+
+    async function loadStats() {
+
+      const { res, data } = await api(`/api/collaborated-stats${buildQueryString(getFilters())}`);
+
+      const tbody = document.getElementById('statsTableBody');
+
+      const colCount = getColumnCount();
+
+      if (!res.ok) {
+
+        tbody.innerHTML = `<tr><td colspan="${colCount}" class="erp-empty">加载失败</td></tr>`;
+
+        return;
+
+      }
+
+
+
+      updateTabCounts(data.tabCounts);
+
+
+
+      totalPages = data.totalPages || 1;
+
+      lastLoadedRows = data.data || [];
+
+      lastTotal = data.total || 0;
+
+      updateSelectAllMenuCounts();
+
+      document.getElementById('pageInfo').textContent = `第 ${data.page} / ${totalPages} 页，本页 ${lastLoadedRows.length} 条，共 ${lastTotal} 条`;
+
+      document.getElementById('prevPageBtn').disabled = data.page <= 1;
+
+      document.getElementById('nextPageBtn').disabled = data.page >= totalPages;
+
+      updateSortIndicators();
+
+
+
+      if (!lastLoadedRows.length) {
+
+        tbody.innerHTML = `<tr><td colspan="${colCount}" class="erp-empty">当前条件下暂无达人数据</td></tr>`;
+
+        syncHeaderCheckbox();
+
+        return;
+
+      }
+
+
+
+      tbody.innerHTML = lastLoadedRows.map(renderStatsRow).join('');
+
+      bindTagsCells();
+
+      bindRemarkFields();
+
+      bindInfluencerEmailFields();
+
+      bindFulfillmentSelects();
+
+      bindRowCheckboxEvents();
+
+      syncHeaderCheckbox();
+
+      window.onInfluencerFollowUpChanged = () => loadStats();
+
+      window.onInfluencerEmailSaved = (influencerId, email) => {
+        const cached = recordsCache.get(String(influencerId));
+        if (cached) cached.email = email;
+      };
+
+      window.onInfluencerIdRenamed = () => {
+        loadStats();
+      };
+
+      document.querySelectorAll('.view-influencer-detail-btn').forEach((btn) => {
+
+        btn.addEventListener('click', () => {
+
+          showInfluencerDetailModal({
+
+            recordId: btn.dataset.recordId ? Number(btn.dataset.recordId) : null,
+
+            influencerId: btn.dataset.influencerId,
+
+            defaultTab: 'collab',
+
+            collabRow: recordsCache.get(String(btn.dataset.influencerId)),
+
+            enableFollowUp: true,
+
+          });
+
+        });
+
+      });
+
+      document.querySelectorAll('.erp-follow-up-open').forEach((btn) => {
+
+        btn.addEventListener('click', (e) => {
+
+          e.preventDefault();
+
+          e.stopPropagation();
+
+          showInfluencerDetailModal({
+
+            influencerId: btn.dataset.influencerId,
+
+            defaultTab: 'followup',
+
+            collabRow: recordsCache.get(String(btn.dataset.influencerId)),
+
+            enableFollowUp: true,
+
+          });
+
+        });
+
+      });
+
+
+
+      document.querySelectorAll('.erp-trend-btn').forEach((btn) => {
+
+        btn.addEventListener('click', (e) => {
+
+          e.preventDefault();
+
+          e.stopPropagation();
+
+          openTrendModal(btn.dataset.influencerId);
+
+        });
+
+      });
+
+    }
+
+
+
+    async function loadStaffOptions() {
+
+      if (staffOptions.length) return staffOptions;
+
+      const { res, data } = await api('/api/staff');
+
+      if (!res.ok) throw new Error(data.message || '获取人员列表失败');
+
+      staffOptions = (data.data || []).filter((item) => item.name !== 'admin');
+
+      return staffOptions;
+
+    }
+
+
+
+    function renderAssigneeCheckboxList(staff) {
+
+      return staff.map((item) => `
+
+        <label class="erp-checkbox-item">
+
+          <input type="checkbox" class="batch-assignee-checkbox" value="${escapeAttr(item.name)}" />
+
+          <span>${escapeHtml(item.name)}${item.commission_rate ? `（${escapeHtml(item.commission_rate)}）` : ''}</span>
+
+        </label>
+
+      `).join('');
+
+    }
+
+
+
+    function getSelectedAssignees() {
+
+      return [...document.querySelectorAll('.batch-assignee-checkbox:checked')].map((el) => el.value.trim()).filter(Boolean);
+
+    }
+
+
+
+    async function openBatchAssignModal() {
+
+      const count = getSelectedCount();
+
+      if (!count) return alert('请先勾选要分配的达人');
+
+      try {
+
+        const staff = await loadStaffOptions();
+
+        document.getElementById('batchAssigneeList').innerHTML = renderAssigneeCheckboxList(staff);
+
+        document.getElementById('batchAssignHint').textContent = `已选 ${count} 位达人，将按达人平均分配给所选负责人`;
+
+        document.getElementById('batchAssignModal').classList.remove('hidden');
+
+      } catch (err) {
+
+        alert(err.message || '无法打开分配窗口');
+
+      }
+
+    }
+
+
+
+    function closeBatchAssignModal() {
+
+      document.getElementById('batchAssignModal')?.classList.add('hidden');
+
+    }
+
+
+
+    function openBatchTagsModal() {
+
+      const count = getSelectedCount();
+
+      if (!count) return alert('请先勾选要设置标签的达人');
+
+      document.getElementById('batchTagsHint').textContent = `已选 ${count} 位达人，将批量设置标签（同一达人的全部申请将同步）`;
+
+      document.getElementById('batchTagsMode').value = 'replace';
+
+      document.getElementById('batchTagsInput').value = '';
+
+      document.getElementById('batchTagsModal').classList.remove('hidden');
+
+    }
+
+
+
+    function closeBatchTagsModal() {
+
+      document.getElementById('batchTagsModal')?.classList.add('hidden');
+
+    }
+
+
+
+    async function submitScrapeEmails() {
+
+      const count = getSelectedCount();
+
+      if (!count) return alert('请先勾选要抓取邮箱的达人');
+
+      const btn = document.getElementById('scrapeEmailBtn');
+
+      btn.disabled = true;
+
+      const oldText = btn.textContent;
+
+      try {
+
+        const data = await runInfluencerEmailScrapeFlow({
+
+          source: 'collaborated',
+
+          scope: allResultsSelected ? 'all' : 'page',
+
+          influencerIds: allResultsSelected ? [] : [...selectedIds],
+
+          filters: getBatchFilters(),
+
+          onStatus: (text) => {
+
+            btn.textContent = text;
+
+          },
+
+        });
+
+        if (data.message) alert(data.message);
+
+        else alert(formatScrapeEmailResultMessage(data));
+
+        loadStats();
+
+      } catch (err) {
+
+        alert(err.message || '抓取邮箱失败');
+
+      } finally {
+
+        btn.disabled = false;
+
+        btn.textContent = oldText;
+
+      }
+
+    }
+
+
+
+    function getSelectedRowsForBatch() {
+      if (allResultsSelected) return lastLoadedRows.slice();
+      return lastLoadedRows.filter((row) => selectedIds.has(String(row.influencer_id)));
+    }
+
+    async function submitBatchTags() {
+
+      const mode = document.getElementById('batchTagsMode').value;
+
+      const tags = document.getElementById('batchTagsInput').value.trim();
+
+      const count = getSelectedCount();
+
+      if (!count) return alert('请先勾选要设置标签的达人');
+
+      if (mode !== 'replace' && !tags) {
+
+        return alert(mode === 'add' ? '请输入要追加的标签' : '请输入要移除的标签');
+
+      }
+
+
+
+      const payload = {
+
+        mode,
+
+        tags,
+
+        scope: allResultsSelected ? 'all' : 'page',
+
+        influencer_ids: allResultsSelected ? [] : [...selectedIds],
+
+        filters: getBatchFilters(),
+
+      };
+
+
+
+      const btn = document.getElementById('confirmBatchTagsBtn');
+
+      btn.disabled = true;
+
+      btn.textContent = '保存中...';
+
+      try {
+
+        const { res, data } = await api('/api/collaborated/batch-tags', {
+
+          method: 'POST',
+
+          body: JSON.stringify(payload),
+
+        });
+
+        if (!res.ok) return alert(data.message || '批量设置标签失败');
+
+        alert(`已成功更新 ${data.updated} 位达人的标签`);
+
+        closeBatchTagsModal();
+
+        resetSelection(false);
+
+        await loadFilterOptions();
+
+        loadStats();
+
+      } finally {
+
+        btn.disabled = false;
+
+        btn.textContent = '确认';
+
+      }
+
+    }
+
+
+
+    async function submitBatchAssign() {
+
+      const assignees = getSelectedAssignees();
+
+      const count = getSelectedCount();
+
+      if (!assignees.length) return alert('请至少选择一位负责人');
+
+      if (!count) return alert('请先勾选要分配的达人');
+
+
+
+      const payload = {
+
+        assignees,
+
+        scope: allResultsSelected ? 'all' : 'page',
+
+        influencer_ids: allResultsSelected ? [] : [...selectedIds],
+
+        filters: getBatchFilters(),
+
+      };
+
+
+
+      const btn = document.getElementById('confirmBatchAssignBtn');
+
+      btn.disabled = true;
+
+      btn.textContent = '分配中...';
+
+      try {
+
+        const { res, data } = await api('/api/collaborated/batch-assign', {
+
+          method: 'POST',
+
+          body: JSON.stringify(payload),
+
+        });
+
+        if (!res.ok) return alert(data.message || '分配失败');
+
+        alert(`已成功将 ${data.updated} 位达人平均分配给 ${assignees.join('、')}`);
+
+        closeBatchAssignModal();
+
+        resetSelection(false);
+
+        loadStats();
+
+      } finally {
+
+        btn.disabled = false;
+
+        btn.textContent = '确认分配';
+
+      }
+
+    }
+
+
+
+    function bindEvents() {
+
+      document.getElementById('collabTabs').addEventListener('click', (e) => {
+
+        const tab = e.target.closest('.erp-tab');
+
+        if (!tab) return;
+
+        currentTab = tab.dataset.tab;
+
+        currentPage = 1;
+
+        resetSelection(false);
+
+        document.querySelectorAll('#collabTabs .erp-tab').forEach((el) => {
+
+          el.classList.toggle('active', el.dataset.tab === currentTab);
+
+        });
+
+        updateCollabTabHint();
+
+        loadStats();
+
+      });
+
+
+
+      document.getElementById('searchBtn').addEventListener('click', () => { currentPage = 1; resetSelection(false); loadStats(); });
+
+      document.getElementById('resetBtn').addEventListener('click', () => {
+
+        document.getElementById('filterInfluencerId').value = '';
+
+        document.getElementById('filterTags').value = '';
+
+        document.getElementById('filterFulfillment').value = '';
+
+        document.getElementById('filterSampleDate').value = '';
+
+        if (document.getElementById('filterAssignee')) document.getElementById('filterAssignee').value = '';
+
+        urlAssignee = '';
+        urlOrderedAfterSample = '';
+        urlSampleDateFrom = '';
+        urlSampleDateTo = '';
+
+        currentTab = 'recent_sample';
+
+        document.querySelectorAll('#collabTabs .erp-tab').forEach((el) => {
+
+          el.classList.toggle('active', el.dataset.tab === 'recent_sample');
+
+        });
+
+        updateCollabTabHint();
+
+        sortField = 'order_count';
+
+        sortOrder = 'desc';
+
+        applyPinSort = true;
+
+        currentPage = 1;
+
+        resetSelection(false);
+
+        loadStats();
+
+      });
+
+      document.getElementById('prevPageBtn').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadStats(); } });
+
+      document.getElementById('nextPageBtn').addEventListener('click', () => { if (currentPage < totalPages) { currentPage++; loadStats(); } });
+
+      document.getElementById('detailCloseBtn').addEventListener('click', () => document.getElementById('detailModal').classList.add('hidden'));
+
+      document.getElementById('trendCloseBtn').addEventListener('click', () => document.getElementById('trendModal').classList.add('hidden'));
+
+      document.getElementById('trendModal').addEventListener('click', (e) => {
+
+        if (e.target.id === 'trendModal') e.target.classList.add('hidden');
+
+      });
+
+      document.getElementById('filterInfluencerId').addEventListener('keydown', (e) => { if (e.key === 'Enter') { currentPage = 1; resetSelection(false); loadStats(); } });
+
+      document.getElementById('filterTags').addEventListener('change', () => { currentPage = 1; resetSelection(false); loadStats(); });
+
+      document.getElementById('filterFulfillment').addEventListener('change', () => { currentPage = 1; resetSelection(false); loadStats(); });
+
+      document.getElementById('filterSampleDate').addEventListener('change', () => { currentPage = 1; resetSelection(false); loadStats(); });
+
+      document.getElementById('filterAssignee')?.addEventListener('change', () => {
+        urlAssignee = document.getElementById('filterAssignee')?.value.trim() || '';
+        currentPage = 1;
+        resetSelection(false);
+        loadStats();
+      });
+
+
+
+      ['video_count', 'order_count', 'refund_count', 'sample_date'].forEach((field) => {
+
+        document.querySelector(`.erp-sort-indicator[data-field="${field}"]`)?.closest('th')?.addEventListener('click', () => toggleSort(field));
+
+      });
+
+
+
+      document.getElementById('batchAssignBtn')?.addEventListener('click', openBatchAssignModal);
+
+      document.getElementById('cancelBatchAssignBtn')?.addEventListener('click', closeBatchAssignModal);
+
+      document.getElementById('confirmBatchAssignBtn')?.addEventListener('click', submitBatchAssign);
+
+      document.getElementById('batchTagsBtn')?.addEventListener('click', openBatchTagsModal);
+
+      document.getElementById('scrapeEmailBtn')?.addEventListener('click', submitScrapeEmails);
+
+      bindStaffMailSettingsModal();
+      bindBatchEmailModal({
+        bindKey: 'collab',
+        apiPath: '/api/collaborated/batch-email',
+        validateSelection: () => {
+          if (!getSelectedCount()) return '请先勾选要发邮件的达人';
+          return '';
+        },
+        getPreviewRows: () => getSelectedRowsForBatch(),
+        onOpen: (settings) => {
+          const rows = getSelectedRowsForBatch();
+          const validCount = rows.filter((row) => isValidRecipientEmailClient(row.email)).length;
+          document.getElementById('batchEmailHint').textContent = `已选 ${rows.length} 位达人，其中 ${validCount} 位有有效邮箱`;
+          document.getElementById('batchEmailMailHint').textContent = `将使用 ${settings.smtp_email} 逐封发送（每人单独收到，最多 ${settings.max_batch_count || 50} 封/次）`;
+        },
+        buildPayload: ({ subject, body }) => ({
+          subject,
+          body,
+          scope: allResultsSelected ? 'all' : 'page',
+          influencer_ids: allResultsSelected ? [] : [...selectedIds],
+          filters: getBatchFilters(),
+        }),
+        onSent: () => loadStats(),
+      });
+
+      document.getElementById('cancelBatchTagsBtn')?.addEventListener('click', closeBatchTagsModal);
+
+      document.getElementById('confirmBatchTagsBtn')?.addEventListener('click', submitBatchTags);
+
+      bindPinButtons(document, () => loadStats());
+
+    }
+
+
+
+    init();
+
+  </script>
+
+</body>
+
+</html>
+
+

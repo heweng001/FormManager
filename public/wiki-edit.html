@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>编辑文章 - LUJIFO跨境电商ERP系统</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet" />
+</head>
+<body>
+  <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+  <script src="/js/common.js"></script>
+  <script>
+    let quill = null;
+    let editingId = null;
+
+    async function init() {
+      await requireLogin();
+      editingId = new URLSearchParams(window.location.search).get('id');
+
+      renderShell({
+        active: 'wiki',
+        breadcrumb: editingId
+          ? '一级菜单 / <a href="/wiki.html">Wiki</a> / <strong>编辑文章</strong>'
+          : '一级菜单 / <a href="/wiki.html">Wiki</a> / <strong>新建文章</strong>',
+        meta: editingId ? '编辑模式' : '新建模式',
+        content: `
+          <div class="wiki-edit-page">
+            <div class="erp-page-header erp-page-header-row">
+              <div>
+                <h1 class="erp-page-title" id="pageTitle">${editingId ? '编辑文章' : '新建文章'}</h1>
+                <p class="erp-page-desc">在新窗口中编辑，底部按钮始终可见。</p>
+              </div>
+              <button id="closeEditBtn" class="erp-btn erp-btn-secondary">关闭窗口</button>
+            </div>
+            <div class="erp-card wiki-edit-card">
+              <div class="erp-card-body wiki-edit-body">
+                <div class="erp-form-field">
+                  <label>标题</label>
+                  <input id="articleTitle" class="erp-input erp-input-wide" placeholder="请输入文章标题" />
+                </div>
+                <div class="erp-form-field wiki-edit-editor-field">
+                  <label>内容</label>
+                  <div id="editor" class="quill-editor wiki-quill-editor"></div>
+                </div>
+              </div>
+              <div class="wiki-edit-footer">
+                <button class="erp-btn erp-btn-secondary" id="cancelEditBtn">取消</button>
+                <button class="erp-btn erp-btn-primary" id="saveArticleBtn">保存</button>
+              </div>
+            </div>
+          </div>
+        `,
+      });
+
+      quill = new Quill('#editor', {
+        theme: 'snow',
+        modules: {
+          toolbar: {
+            container: [
+              [{ header: [1, 2, 3, false] }],
+              ['bold', 'italic', 'underline', 'strike'],
+              [{ color: [] }, { background: [] }],
+              [{ list: 'ordered' }, { list: 'bullet' }],
+              ['link', 'image'],
+              ['clean'],
+            ],
+          },
+        },
+      });
+      setupWikiImageUpload();
+
+      document.getElementById('saveArticleBtn').addEventListener('click', saveArticle);
+      document.getElementById('cancelEditBtn').addEventListener('click', closeWindow);
+      document.getElementById('closeEditBtn').addEventListener('click', closeWindow);
+
+      if (editingId) {
+        const { res, data } = await api(`/api/articles/${editingId}`);
+        if (!res.ok) {
+          alert(data.message || '加载失败');
+          closeWindow();
+          return;
+        }
+        document.getElementById('articleTitle').value = data.data.title;
+        document.title = `编辑：${data.data.title} - LUJIFO跨境电商ERP系统`;
+        quill.root.innerHTML = data.data.content || '';
+      }
+    }
+
+    async function uploadWikiImage(file) {
+      const formData = new FormData();
+      formData.append('image', file);
+      const res = await fetch('/api/articles/upload-image', {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 404) {
+        throw new Error('图片上传接口不可用，请重启服务后重试（node server.js）');
+      }
+      if (!res.ok) throw new Error(data.message || `图片上传失败（${res.status}）`);
+      return data.url;
+    }
+
+    function insertImageToEditor(url) {
+      quill.focus();
+      let range = quill.getSelection();
+      if (!range) {
+        range = { index: Math.max(0, quill.getLength() - 1), length: 0 };
+      }
+      quill.insertEmbed(range.index, 'image', url, 'user');
+      quill.insertText(range.index + 1, '\n', 'user');
+      quill.setSelection(range.index + 2, 0);
+    }
+
+    function pickAndUploadImage() {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/jpeg,image/png,image/gif,image/webp,image/bmp,.jpg,.jpeg,.png,.gif,.webp,.bmp';
+      input.style.display = 'none';
+      document.body.appendChild(input);
+      input.addEventListener('change', async () => {
+        const file = input.files?.[0];
+        input.remove();
+        if (!file) return;
+        try {
+          const url = await uploadWikiImage(file);
+          insertImageToEditor(url);
+        } catch (err) {
+          alert(err.message || '图片上传失败');
+        }
+      });
+      input.click();
+    }
+
+    function setupWikiImageUpload() {
+      const toolbar = quill.getModule('toolbar');
+      if (!toolbar) return;
+      toolbar.addHandler('image', pickAndUploadImage);
+
+      quill.root.addEventListener('paste', async (e) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (const item of items) {
+          if (!item.type.startsWith('image/')) continue;
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (!file) return;
+          try {
+            const url = await uploadWikiImage(file);
+            insertImageToEditor(url);
+          } catch (err) {
+            alert(err.message || '图片粘贴上传失败');
+          }
+          return;
+        }
+      });
+    }
+
+    function closeWindow() {
+      if (window.opener && !window.opener.closed) {
+        try { window.opener.postMessage({ type: 'wiki-articles-changed' }, '*'); } catch {}
+      }
+      window.close();
+      setTimeout(() => { window.location.href = '/wiki.html'; }, 100);
+    }
+
+    async function saveArticle() {
+      const title = document.getElementById('articleTitle').value.trim();
+      const content = quill.root.innerHTML;
+      if (!title) return alert('请输入标题');
+
+      const btn = document.getElementById('saveArticleBtn');
+      btn.disabled = true;
+      btn.textContent = '保存中...';
+      try {
+        const url = editingId ? `/api/articles/${editingId}` : '/api/articles';
+        const method = editingId ? 'PUT' : 'POST';
+        const { res, data } = await api(url, { method, body: JSON.stringify({ title, content }) });
+        if (!res.ok) return alert(data.message || '保存失败');
+        alert('保存成功');
+        if (window.opener && !window.opener.closed) {
+          try { window.opener.postMessage({ type: 'wiki-articles-changed' }, '*'); } catch {}
+        }
+        if (editingId) {
+          window.location.href = `/wiki-view.html?id=${editingId}`;
+        } else {
+          closeWindow();
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '保存';
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

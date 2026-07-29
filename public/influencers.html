@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>达人 - LUJIFO跨境电商ERP系统</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <script src="/js/common.js"></script>
+  <script>
+    const PAGE_SIZE = 50;
+    const COLUMN_COUNT = 16;
+    const GROUP_HEADER_MIDDLE_COLS = 12;
+    const GROUP_HEADER_MIDDLE_AFTER_TAGS = GROUP_HEADER_MIDDLE_COLS - 1;
+
+    function renderPendingAuditSampleDateCell(record, groupKey) {
+      if (groupKey) return renderApplicationSampleDateCell(record);
+      return renderInfluencerSampleDateCell(record);
+    }
+    const saveTimers = new Map();
+    const recordsCache = new Map();
+    const influencerAuditAppsCache = new Map();
+    let currentTab = 'pending';
+    let currentPage = 1;
+    let totalPages = 1;
+    let sortField = 'import_batch_time';
+    let sortOrder = 'desc';
+    let applyPinSort = true;
+    let selectedFile = null;
+    let importPanelOpen = false;
+    let lastLoadedRecords = [];
+    let lastTotal = 0;
+    let staffOptions = [];
+    let allResultsSelected = false;
+    let selectedIds = new Set();
+    let urlSampleDateFrom = '';
+    let urlSampleDateTo = '';
+    let urlAuditDateFrom = '';
+    let urlAuditDateTo = '';
+    let urlAssignee = '';
+
+    async function init() {
+      await requireLogin();
+      document.title = '待审核 - LUJIFO跨境电商ERP系统';
+      renderShell({
+        active: 'influencers-pending',
+        breadcrumb: '一级菜单 / <strong>达人</strong> / <strong>待审核</strong>',
+        meta: isManager() ? '全部达人数据' : '我的负责达人',
+        content: `
+          <div class="erp-page-header erp-page-header-compact">
+            <h1 class="erp-page-title erp-page-title-inline">待审核<span class="erp-page-desc-inline"> — 导入、筛选、审核达人申请记录。导入时按佣金率自动分配负责人。</span></h1>
+          </div>
+          <div class="erp-card erp-card-compact" style="margin-bottom:8px;">
+            <div class="erp-card-body erp-card-body-compact">
+              <div class="erp-toolbar erp-toolbar-compact">
+                <div class="erp-field"><label>达人 id</label><input id="filterInfluencerId" class="erp-input" placeholder="关键词" autocomplete="off" readonly /></div>
+                <div class="erp-field"><label>佣金率</label><select id="filterCommission" class="erp-input"><option value="">全部</option></select></div>
+                <div class="erp-field"><label>标签</label><select id="filterTags" class="erp-input"><option value="">全部</option></select></div>
+                ${isManager() ? '<div class="erp-field"><label>负责人</label><select id="filterAssignee" class="erp-input"><option value="">全部</option></select></div>' : ''}
+                <div class="erp-field"><label>导入时间</label><select id="filterImportBatch" class="erp-input"><option value="">全部</option></select></div>
+                <div class="erp-field"><label>导入人</label><select id="filterImportedBy" class="erp-input"><option value="">全部</option></select></div>
+                <div class="erp-field"><label>店铺名称</label><select id="filterShopName" class="erp-input"><option value="">全部</option></select></div>
+                <button id="searchBtn" class="erp-btn erp-btn-primary">查询</button>
+                <button id="resetBtn" class="erp-btn erp-btn-secondary">重置</button>
+                <button id="batchTagsBtn" class="erp-btn erp-btn-secondary">批量设置标签</button>
+                <button id="scrapeEmailBtn" class="erp-btn erp-btn-secondary">抓取邮箱</button>
+                <button id="myMailSettingsBtn" class="erp-btn erp-btn-secondary">我的邮箱</button>
+                <button id="batchEmailBtn" class="erp-btn erp-btn-secondary">群发邮件</button>
+                <div class="erp-toolbar-spacer"></div>
+                <button id="toggleImportBtn" class="erp-btn erp-btn-secondary">Excel 导入</button>
+                ${isManager() ? '<button id="batchAssignBtn" class="erp-btn erp-btn-secondary">分配负责人</button><button id="batchDeleteBtn" class="erp-btn erp-btn-danger">批量删除</button>' : ''}
+                <button id="exportBtn" class="erp-btn erp-btn-success">导出 Excel</button>
+              </div>
+              <div id="importPanel" class="erp-import-panel hidden">
+                <div id="dropZone" class="erp-upload-zone compact">
+                  <p class="erp-upload-title">拖拽或点击上传 ${IMPORT_FILE_LABEL}</p>
+                  <p class="erp-upload-hint">跳过首行表头，按列顺序导入；第 10 列为申请ID，按申请ID去重并根据佣金率自动分配负责人</p>
+                  <input type="file" id="fileInput" accept="${IMPORT_FILE_ACCEPT}" style="display:none" />
+                </div>
+                <p id="fileName" class="erp-meta hidden-text"></p>
+                <div class="erp-toolbar" style="margin-top:8px;">
+                  <button id="uploadBtn" class="erp-btn erp-btn-primary" disabled>开始导入</button>
+                  <button id="cancelImportBtn" class="erp-btn erp-btn-secondary">收起</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="erp-card">
+            <div class="erp-tabs" id="auditTabs">
+              <button class="erp-tab" data-tab="all">全部 <span class="erp-tab-count" id="countAll">0</span></button>
+              <button class="erp-tab active" data-tab="pending">待审核 <span class="erp-tab-count" id="countPending">0</span></button>
+              <button class="erp-tab" data-tab="tentative">待定 <span class="erp-tab-count" id="countTentative">0</span></button>
+              <button class="erp-tab" data-tab="approved">通过 <span class="erp-tab-count" id="countApproved">0</span></button>
+              <button class="erp-tab" data-tab="rejected">拒绝 <span class="erp-tab-count" id="countRejected">0</span></button>
+            </div>
+            <div class="erp-table-wrap">
+              <table class="erp-table">
+                <thead><tr>
+                  <th class="cell-checkbox">
+                    <div class="erp-select-all-wrap" id="selectAllWrap">
+                      <input type="checkbox" id="selectAllCheckbox" title="批量选择" />
+                      <div id="selectAllMenu" class="erp-select-all-menu hidden">
+                        <button type="button" data-scope="page" id="selectPageBtn">选中本页 <span id="selectPageCount">0</span> 行</button>
+                        <button type="button" data-scope="all" id="selectAllBtn">选中所有搜索结果 <span id="selectAllCount">0</span> 行</button>
+                        <button type="button" data-scope="clear" id="selectClearBtn">取消选择</button>
+                      </div>
+                    </div>
+                  </th>
+                  <th class="erp-sortable" data-sort="influencer_id">达人id <span class="erp-sort-indicator" data-field="influencer_id">↕</span></th><th class="cell-tags">标签</th><th class="cell-assignee">负责人</th><th>粉丝数</th><th>预计发布率</th><th>成交金额</th><th>平均视频播放量</th><th class="cell-model">型号</th>
+                  <th class="erp-sortable" data-sort="commission">佣金率 <span class="erp-sort-indicator" data-field="commission">↕</span></th>
+                  <th class="cell-audit">审核</th><th class="cell-audit-reason">审核原因</th><th>备注</th><th class="erp-sortable cell-import-time" data-sort="import_batch_time">导入时间 <span class="erp-sort-indicator" data-field="import_batch_time">↕</span></th><th class="cell-sample-date">寄样日期</th><th>操作</th>
+                </tr></thead>
+                <tbody id="recordTableBody"><tr><td colspan="${COLUMN_COUNT}" class="erp-empty">加载中...</td></tr></tbody>
+              </table>
+            </div>
+            <div class="erp-pagination">
+              <span id="pageInfo">第 1 / 1 页，共 0 条</span>
+              <div class="erp-pagination-actions">
+                <button id="prevPageBtn" class="erp-btn erp-btn-secondary" disabled>上一页</button>
+                <button id="nextPageBtn" class="erp-btn erp-btn-secondary" disabled>下一页</button>
+              </div>
+            </div>
+          </div>
+          <div id="detailModal" class="erp-modal-overlay hidden">
+            <div class="erp-modal erp-modal-wide">
+              <div class="erp-modal-header">达人详情</div>
+              <div class="erp-modal-body">
+                <div class="erp-tabs erp-detail-modal-tabs" id="influencerDetailTabs">
+                  <button type="button" class="erp-tab active" data-tab="audit">审核信息</button>
+                  <button type="button" class="erp-tab" data-tab="collab">合作信息</button>
+                </div>
+                <div id="detailAuditContent" class="erp-detail-stack"></div>
+                <div id="detailCollabContent" class="erp-detail-grid hidden"></div>
+              </div>
+              <div class="erp-modal-footer"><button id="detailCloseBtn" class="erp-btn erp-btn-primary">关闭</button></div>
+            </div>
+          </div>
+          <div id="importModal" class="erp-modal-overlay hidden">
+            <div class="erp-modal"><div class="erp-modal-header">导入完成</div><div class="erp-modal-body"><p id="importMessage"></p></div>
+            <div class="erp-modal-footer"><button id="importCloseBtn" class="erp-btn erp-btn-primary">确定</button></div></div>
+          </div>
+          <div id="batchAssignModal" class="erp-modal-overlay hidden">
+            <div class="erp-modal">
+              <div class="erp-modal-header">分配负责人</div>
+              <div class="erp-modal-body">
+                <p id="batchAssignHint" class="erp-meta" style="margin-bottom:10px;">将分配 0 位达人</p>
+                <div class="erp-form-field">
+                  <label>负责人（可多选，将平均分配）</label>
+                  <div id="batchAssigneeList" class="erp-checkbox-list"></div>
+                </div>
+              </div>
+              <div class="erp-modal-footer">
+                <button class="erp-btn erp-btn-secondary" id="cancelBatchAssignBtn">取消</button>
+                <button class="erp-btn erp-btn-primary" id="confirmBatchAssignBtn">确认分配</button>
+              </div>
+            </div>
+          </div>
+          <div id="batchTagsModal" class="erp-modal-overlay hidden">
+            <div class="erp-modal">
+              <div class="erp-modal-header">批量设置标签</div>
+              <div class="erp-modal-body">
+                <p id="batchTagsHint" class="erp-meta" style="margin-bottom:10px;">已选 0 位达人</p>
+                <div class="erp-form-field">
+                  <label>操作方式</label>
+                  <select id="batchTagsMode" class="erp-input">
+                    <option value="replace">替换为</option>
+                    <option value="add">追加</option>
+                    <option value="remove">移除</option>
+                  </select>
+                </div>
+                <div class="erp-form-field">
+                  <label>标签（多个用逗号分隔）</label>
+                  <input id="batchTagsInput" class="erp-input" type="text" placeholder="例如：分配,重点" />
+                  <p class="erp-meta" style="margin-top:6px;">「替换为」留空可清空标签；同一达人的全部申请将同步更新。</p>
+                </div>
+              </div>
+              <div class="erp-modal-footer">
+                <button class="erp-btn erp-btn-secondary" id="cancelBatchTagsBtn">取消</button>
+                <button class="erp-btn erp-btn-primary" id="confirmBatchTagsBtn">确认</button>
+              </div>
+            </div>
+          </div>
+          <div id="auditAppsModal" class="erp-modal-overlay hidden">
+            <div class="erp-modal erp-modal-wide">
+              <div class="erp-modal-header" id="auditAppsModalTitle">申请明细</div>
+              <div class="erp-modal-body" id="auditAppsModalBody"></div>
+              <div class="erp-modal-footer"><button id="auditAppsModalCloseBtn" class="erp-btn erp-btn-primary">关闭</button></div>
+            </div>
+          </div>
+          ${renderStaffMailModalsHtml()}
+        `,
+      });
+      bindEvents();
+      bindInfluencerDetailModal();
+      setupSelectAllMenu();
+      setupFilterAutofillGuard('filterInfluencerId');
+      applyFiltersFromUrl();
+      await loadFilterOptions();
+      loadRecords();
+    }
+
+    function applyFiltersFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const auditTab = params.get('audit_tab');
+      if (auditTab && ['all', 'pending', 'tentative', 'approved', 'rejected'].includes(auditTab)) {
+        currentTab = auditTab;
+        document.querySelectorAll('#auditTabs .erp-tab').forEach((el) => {
+          el.classList.toggle('active', el.dataset.tab === currentTab);
+        });
+      }
+      const assignee = params.get('assignee');
+      if (assignee && document.getElementById('filterAssignee')) {
+        document.getElementById('filterAssignee').value = assignee;
+      }
+      urlSampleDateFrom = params.get('sample_date_from') || '';
+      urlSampleDateTo = params.get('sample_date_to') || '';
+      urlAuditDateFrom = params.get('audit_date_from') || '';
+      urlAuditDateTo = params.get('audit_date_to') || '';
+      urlAssignee = params.get('assignee') || '';
+      if (urlAssignee && document.getElementById('filterAssignee')) {
+        document.getElementById('filterAssignee').value = urlAssignee;
+      }
+    }
+
+    function getFilters() {
+      return {
+        influencer_id: document.getElementById('filterInfluencerId').value.trim(),
+        commission: document.getElementById('filterCommission').value.trim(),
+        tags: document.getElementById('filterTags').value.trim(),
+        assignee: urlAssignee || (isManager() ? (document.getElementById('filterAssignee')?.value.trim() || '') : ''),
+        import_batch: document.getElementById('filterImportBatch')?.value.trim() || '',
+        imported_by: document.getElementById('filterImportedBy')?.value.trim() || '',
+        shop_name: document.getElementById('filterShopName')?.value.trim() || '',
+        audit_tab: currentTab,
+        sort_field: sortField,
+        sort_order: sortOrder,
+        apply_pin: applyPinSort ? 1 : 0,
+        sample_date_from: urlSampleDateFrom,
+        sample_date_to: urlSampleDateTo,
+        audit_date_from: urlAuditDateFrom,
+        audit_date_to: urlAuditDateTo,
+        page: currentPage,
+        pageSize: PAGE_SIZE,
+      };
+    }
+
+    function getBatchFilters() {
+      const { page, pageSize, ...filters } = getFilters();
+      return filters;
+    }
+
+    function getUniqueInfluencerRowsForBatchEmail() {
+      const records = allResultsSelected
+        ? lastLoadedRecords
+        : lastLoadedRecords.filter((record) => selectedIds.has(Number(record.id)));
+      return dedupeRowsByInfluencerId(records);
+    }
+
+    function getSelectedCount() {
+      return allResultsSelected ? lastTotal : selectedIds.size;
+    }
+
+    function selectCurrentPage() {
+      if (!lastLoadedRecords.length) return alert('当前页没有可选择的记录');
+      allResultsSelected = false;
+      selectedIds = new Set(lastLoadedRecords.map((item) => item.id));
+      syncRowCheckboxes();
+      closeSelectAllMenu();
+    }
+
+    function selectAllResults() {
+      if (!lastTotal) return alert('当前没有可选择的记录');
+      allResultsSelected = true;
+      selectedIds.clear();
+      syncRowCheckboxes();
+      closeSelectAllMenu();
+    }
+
+    function clearSelection() {
+      resetSelection(false);
+      syncRowCheckboxes();
+      closeSelectAllMenu();
+    }
+
+    function updateSelectAllMenuCounts() {
+      const pageCountEl = document.getElementById('selectPageCount');
+      const allCountEl = document.getElementById('selectAllCount');
+      if (pageCountEl) pageCountEl.textContent = lastLoadedRecords.length;
+      if (allCountEl) allCountEl.textContent = lastTotal;
+    }
+
+    function openSelectAllMenu() {
+      const menu = document.getElementById('selectAllMenu');
+      if (!menu) return;
+      updateSelectAllMenuCounts();
+      menu.classList.remove('hidden');
+    }
+
+    function closeSelectAllMenu() {
+      document.getElementById('selectAllMenu')?.classList.add('hidden');
+    }
+
+    function toggleSelectAllMenu() {
+      const menu = document.getElementById('selectAllMenu');
+      if (!menu) return;
+      if (menu.classList.contains('hidden')) openSelectAllMenu();
+      else closeSelectAllMenu();
+    }
+
+    function setupSelectAllMenu() {
+      const checkbox = document.getElementById('selectAllCheckbox');
+      const wrap = document.getElementById('selectAllWrap');
+      if (!checkbox || !wrap) return;
+
+      checkbox.addEventListener('mousedown', (e) => e.preventDefault());
+      checkbox.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleSelectAllMenu();
+      });
+
+      document.getElementById('selectPageBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectCurrentPage();
+      });
+      document.getElementById('selectAllBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectAllResults();
+      });
+      document.getElementById('selectClearBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearSelection();
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!wrap.contains(e.target)) closeSelectAllMenu();
+      });
+    }
+
+    function resetSelection(selectAll = false) {
+      allResultsSelected = selectAll;
+      selectedIds.clear();
+      const header = document.getElementById('selectAllCheckbox');
+      if (header) header.checked = selectAll;
+    }
+
+    function isRowChecked(recordId) {
+      return allResultsSelected || selectedIds.has(Number(recordId));
+    }
+
+    function syncHeaderCheckbox() {
+      const header = document.getElementById('selectAllCheckbox');
+      if (!header) return;
+      if (allResultsSelected) {
+        header.checked = true;
+        header.indeterminate = false;
+        return;
+      }
+      header.checked = selectedIds.size > 0 && selectedIds.size === lastLoadedRecords.length;
+      header.indeterminate = selectedIds.size > 0 && selectedIds.size < lastLoadedRecords.length;
+    }
+
+    function syncRowCheckboxes() {
+      document.querySelectorAll('.row-checkbox').forEach((box) => {
+        box.checked = isRowChecked(box.dataset.id);
+      });
+      syncHeaderCheckbox();
+    }
+
+    function toggleImportPanel(forceOpen) {
+      const panel = document.getElementById('importPanel');
+      const btn = document.getElementById('toggleImportBtn');
+      importPanelOpen = typeof forceOpen === 'boolean' ? forceOpen : !importPanelOpen;
+      panel.classList.toggle('hidden', !importPanelOpen);
+      btn.textContent = importPanelOpen ? '收起导入' : 'Excel 导入';
+    }
+
+    function resetImportForm() {
+      selectedFile = null;
+      const fileInput = document.getElementById('fileInput');
+      if (fileInput) fileInput.value = '';
+      const fileName = document.getElementById('fileName');
+      if (fileName) {
+        fileName.textContent = '';
+        fileName.classList.add('hidden-text');
+      }
+      const uploadBtn = document.getElementById('uploadBtn');
+      if (uploadBtn) {
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = '开始导入';
+      }
+    }
+
+    function buildQueryString(filters) {
+      const params = new URLSearchParams();
+      Object.entries(filters).forEach(([k, v]) => {
+        if (v !== '' && v != null) params.set(k, String(v));
+      });
+      const q = params.toString();
+      return q ? `?${q}` : '';
+    }
+
+    function formatImportBatchLabel(value) {
+      if (!value) return '';
+      return formatImportTimeValue(value);
+    }
+
+    function renderImportTimeCell(record) {
+      if (record.import_batch_time) {
+        return escapeHtml(formatImportTimeValue(record.import_batch_time));
+      }
+      return escapeHtml(formatDateTime(record.create_time));
+    }
+
+    async function loadFilterOptions() {
+      const { res, data } = await api('/api/records/filter-options');
+      if (!res.ok) return;
+
+      const commissionSelect = document.getElementById('filterCommission');
+      const commissionCurrent = commissionSelect.value;
+      commissionSelect.innerHTML = '<option value="">全部</option>'
+        + (data.has_empty_commission ? '<option value="__empty__">（空）</option>' : '')
+        + (data.commission_rates || [])
+          .map((rate) => `<option value="${escapeAttr(rate)}">${escapeHtml(formatPercent(rate))}</option>`)
+          .join('');
+      if (commissionCurrent) commissionSelect.value = commissionCurrent;
+
+      const tagsSelect = document.getElementById('filterTags');
+      const tagsCurrent = tagsSelect.value;
+      tagsSelect.innerHTML = '<option value="">全部</option>'
+        + (data.has_empty_tags ? '<option value="__empty__">（空）</option>' : '')
+        + (data.tags || [])
+          .map((tag) => `<option value="${escapeAttr(tag)}">${escapeHtml(tag)}</option>`)
+          .join('');
+      if (tagsCurrent) tagsSelect.value = tagsCurrent;
+
+      const assigneeSelect = document.getElementById('filterAssignee');
+      if (assigneeSelect) {
+        const assigneeCurrent = assigneeSelect.value;
+        assigneeSelect.innerHTML = '<option value="">全部</option>'
+          + (data.has_empty_assignee ? '<option value="__empty__">（空）</option>' : '')
+          + (data.has_assignee_conflict ? '<option value="__conflict__">冲突</option>' : '')
+          + (data.assignees || [])
+            .map((name) => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`)
+            .join('');
+        if (assigneeCurrent || urlAssignee) assigneeSelect.value = assigneeCurrent || urlAssignee;
+      }
+
+      const importBatchSelect = document.getElementById('filterImportBatch');
+      if (importBatchSelect) {
+        const importBatchCurrent = importBatchSelect.value;
+        importBatchSelect.innerHTML = '<option value="">全部</option>'
+          + (data.import_batches || [])
+            .map((item) => `<option value="${escapeAttr(item.value)}">${escapeHtml(formatImportBatchLabel(item.value))}（${item.count} 条）</option>`)
+            .join('');
+        if (importBatchCurrent) {
+          importBatchSelect.value = importBatchCurrent;
+        }
+      }
+
+      const importedBySelect = document.getElementById('filterImportedBy');
+      if (importedBySelect) {
+        const importedByCurrent = importedBySelect.value;
+        importedBySelect.innerHTML = '<option value="">全部</option>'
+          + (data.has_empty_importer ? '<option value="__empty__">（空）</option>' : '')
+          + (data.importers || [])
+            .map((name) => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`)
+            .join('');
+        if (importedByCurrent) importedBySelect.value = importedByCurrent;
+      }
+
+      const shopNameSelect = document.getElementById('filterShopName');
+      if (shopNameSelect) {
+        const shopNameCurrent = shopNameSelect.value;
+        shopNameSelect.innerHTML = '<option value="">全部</option>'
+          + (data.has_empty_shop_name ? '<option value="__empty__">（空）</option>' : '')
+          + (data.shop_names || [])
+            .map((name) => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`)
+            .join('');
+        if (shopNameCurrent) shopNameSelect.value = shopNameCurrent;
+      }
+    }
+
+    function renderInfluencerLink(id) {
+      const clean = String(id || '').trim().replace(/^@+/, '');
+      if (!clean) return '-';
+      const url = `https://www.tiktok.com/@${encodeURIComponent(clean)}?shop_region=US`;
+      return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer" class="erp-link-external">${escapeHtml(clean)}</a>`;
+    }
+
+    function getTagsCellHandlers() {
+      return {
+        getTagsForInfluencer(influencerId) {
+          const record = [...recordsCache.values()].find((item) => String(item.influencer_id || '') === String(influencerId));
+          return parseTagsList(record?.tags);
+        },
+        async saveTagsForInfluencer(influencerId, tags) {
+          const value = joinTagsList(tags);
+          const { res, data } = await api(`/api/influencer-profiles/${encodeURIComponent(influencerId)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ tags: value }),
+          });
+          if (!res.ok) {
+            alert(data.message || '标签保存失败');
+            return false;
+          }
+          recordsCache.forEach((record) => {
+            if (String(record.influencer_id || '') === String(influencerId)) record.tags = value;
+          });
+          return true;
+        },
+        onAfterSave() {
+          setTimeout(() => loadFilterOptions(), 200);
+        },
+      };
+    }
+
+    function bindTagsCells() {
+      bindInfluencerTagsCells(getTagsCellHandlers());
+    }
+
+    function renderEditableInput(recordId, field, value, options = {}) {
+      const { narrow = false, placeholder = '', showTooltip = false } = options;
+      let cls = 'erp-editable editable-field';
+      if (narrow) cls += ' erp-editable-narrow';
+      const titleAttr = showTooltip && value ? ` title="${escapeAttr(value)}"` : '';
+      return `<div class="erp-editable-wrap"><input type="text" data-id="${recordId}" data-field="${field}" value="${escapeAttr(value || '')}" placeholder="${escapeAttr(placeholder)}" class="${cls}"${titleAttr} /><span class="erp-save-status save-status hidden"></span></div>`;
+    }
+
+    function renderSampleDateCell(record) {
+      return renderSampleDateListCell(record);
+    }
+
+    function cacheInfluencerAuditApps(record) {
+      if (!record?.influencer_id) return;
+      const count = Number(record.influencer_application_count) || 0;
+      if (count <= 1) return;
+      influencerAuditAppsCache.set(String(record.influencer_id), record.influencer_applications || []);
+    }
+
+    function getApplicationCountBadgeTitle(record) {
+      const count = Number(record?.influencer_application_count) || 0;
+      if (count <= 1) return '';
+      if (record.influencer_mixed_audit) {
+        return `${count} 条申请，含不同审核状态，点击查看明细`;
+      }
+      const statusLabel = record.influencer_applications?.[0]?.audit_status_label || '同一状态';
+      return `${count} 条申请，均为${statusLabel}，点击查看明细`;
+    }
+
+    function renderInfluencerApplicationCountBadge(record) {
+      const count = Number(record?.influencer_application_count) || 0;
+      if (count <= 1) return '';
+      const mixed = Boolean(record?.influencer_mixed_audit);
+      const title = getApplicationCountBadgeTitle(record);
+      const toneClass = mixed ? 'erp-audit-app-badge--mixed' : 'erp-audit-app-badge--same';
+      return `<button type="button" class="erp-audit-app-badge ${toneClass}" data-influencer-id="${escapeAttr(String(record.influencer_id || ''))}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">${count}</button>`;
+    }
+
+    function renderInfluencerIdCellWithBadge(record) {
+      const idCell = renderInfluencerIdCell(record.influencer_id, record.pinned, renderInfluencerLink);
+      const badge = renderInfluencerApplicationCountBadge(record);
+      const email = renderInfluencerEmailInline(record.influencer_id, record.email, record);
+      if (!badge) return `<span class="erp-influencer-id-wrap">${idCell}${email}</span>`;
+      return `<span class="erp-influencer-id-wrap">${idCell}${badge}${email}</span>`;
+    }
+
+    function showAuditApplicationsModal(influencerId) {
+      const applications = influencerAuditAppsCache.get(String(influencerId || '')) || [];
+      document.getElementById('auditAppsModalTitle').textContent = `申请明细 - ${influencerId || '-'}`;
+      document.getElementById('auditAppsModalBody').innerHTML = renderAuditApplicationsTableHtml(applications);
+      document.getElementById('auditAppsModal').classList.remove('hidden');
+    }
+
+    function closeAuditApplicationsModal() {
+      document.getElementById('auditAppsModal').classList.add('hidden');
+    }
+
+    function renderAssigneeCell(record) {
+      const text = record.assignee || '-';
+      const cls = record.assignee_conflict ? ' assignee-conflict' : '';
+      const title =
+        record.assignee_conflict && record.assignee_names?.length
+          ? ` title="${escapeAttr(record.assignee_names.join('、'))}"`
+          : '';
+      return `<td class="cell-assignee${cls}"${title}>${escapeHtml(text)}</td>`;
+    }
+
+    function renderRecordRow(record, options = {}) {
+      const { showInfluencer = true, groupKey = '', hidden = false, showCheckbox = true } = options;
+      recordsCache.set(String(record.id), record);
+      const checked = isRowChecked(record.id) ? 'checked' : '';
+      const checkboxCell = showCheckbox
+        ? `<td class="cell-checkbox"><input type="checkbox" class="row-checkbox" data-id="${record.id}" ${checked} /></td>`
+        : '<td class="cell-checkbox"></td>';
+      const publishRateAlert = (() => {
+        const num = parsePercentNumber(record.expected_publish_rate);
+        return num !== null && num < 50;
+      })();
+      const amountAlert = (() => {
+        const num = parseCurrencyNumber(record.transaction_amount);
+        return num !== null && num < 100;
+      })();
+      const viewsAlert = (() => {
+        const num = parseMetricNumber(record.avg_video_views);
+        return num !== null && num < 300;
+      })();
+      return `<tr class="record-row ${groupKey ? 'erp-group-child-row' : ''} ${hidden ? 'is-hidden' : ''}" data-record-id="${record.id}" ${groupKey ? `data-group-key="${escapeAttr(groupKey)}"` : ''}>
+        ${checkboxCell}
+        <td class="cell-id">${showInfluencer ? renderInfluencerIdCellWithBadge(record) : '<span class="cell-indent">↳ 申请</span>'}</td>
+        <td class="cell-tags">${showInfluencer ? renderTagsCell(record.influencer_id, record.tags) : ''}</td>
+        ${renderAssigneeCell(record)}
+        <td>${escapeHtml(record.follower_count || '-')}</td>
+        <td class="${metricAlertClass(publishRateAlert)}">${formatPercent(record.expected_publish_rate)}</td>
+        <td class="${metricAlertClass(amountAlert)}">${escapeHtml(record.transaction_amount || '-')}</td>
+        <td class="${metricAlertClass(viewsAlert)}">${escapeHtml(record.avg_video_views || '-')}</td>
+        <td class="cell-truncate cell-model" title="${escapeAttr(buildModelSkuTitle(record.model, record.sku_id, record.shop_name))}">${escapeHtml(buildShopModelDisplay(record.shop_name, record.model) || '-')}</td>
+        <td>${formatPercent(record.commission)}</td>
+        <td class="cell-audit">${renderEditableInput(record.id, 'audit_status', record.audit_status, { narrow: true })}</td>
+        <td class="cell-audit-reason">${renderEditableInput(record.id, 'audit_reason', record.audit_reason, { showTooltip: true })}</td>
+        <td>${renderEditableInput(record.id, 'remark', record.remark)}</td>
+        <td class="cell-import-time">${renderImportTimeCell(record)}</td>
+        <td class="cell-sample-date">${renderPendingAuditSampleDateCell(record, groupKey)}</td>
+        <td><button type="button" class="erp-btn erp-btn-secondary erp-btn-view view-detail-btn" data-id="${record.id}">查看</button></td>
+      </tr>`;
+    }
+
+    function updateSortIndicators() {
+      document.querySelectorAll('.erp-sort-indicator').forEach((el) => {
+        const field = el.dataset.field;
+        const active = field === sortField;
+        el.textContent = active ? (sortOrder === 'asc' ? '↑' : '↓') : '↕';
+        el.classList.toggle('active', active);
+      });
+    }
+
+    function toggleSort(field) {
+      applyPinSort = false;
+      if (sortField === field) sortOrder = sortOrder === 'desc' ? 'asc' : 'desc';
+      else {
+        sortField = field;
+        sortOrder = 'desc';
+      }
+      currentPage = 1;
+      loadRecords();
+    }
+
+    function getImportTimeSortKey(record) {
+      const text = String(record?.import_batch_time || record?.create_time || '').trim();
+      if (!text) return '';
+      return text.replace('T', ' ').slice(0, 19);
+    }
+
+    function compareRecordsForSort(a, b, field, order) {
+      const dir = order === 'asc' ? 1 : -1;
+      if (field === 'influencer_id') {
+        const cmp = String(a.influencer_id || '').localeCompare(String(b.influencer_id || ''), 'zh-CN');
+        if (cmp !== 0) return dir * cmp;
+      } else if (field === 'commission') {
+        const av = parsePercentNumber(a.commission) ?? -1;
+        const bv = parsePercentNumber(b.commission) ?? -1;
+        if (av !== bv) return dir * (av - bv);
+      } else {
+        const cmp = getImportTimeSortKey(a).localeCompare(getImportTimeSortKey(b));
+        if (cmp !== 0) return dir * cmp;
+      }
+      return Number(b.id || 0) - Number(a.id || 0);
+    }
+
+    function renderGroupHeader(influencerId, count, groupKey, mixedAudit, pinned = 0, record = null) {
+      const idCell = record
+        ? renderInfluencerIdCell(record.influencer_id, record.pinned, renderInfluencerLink)
+        : renderInfluencerIdCell(influencerId, pinned, renderInfluencerLink);
+      if (record) recordsCache.set(String(record.id), record);
+      const badge = record ? renderInfluencerApplicationCountBadge(record) : '';
+      const email = record ? renderInfluencerEmailInline(record.influencer_id, record.email, record) : '';
+      const emptyCells = Array.from({ length: GROUP_HEADER_MIDDLE_AFTER_TAGS }, () => '<td class="erp-group-header-empty"></td>').join('');
+      const tagsCell = record
+        ? `<td class="cell-tags">${renderTagsCell(record.influencer_id, record.tags)}</td>`
+        : '<td class="cell-tags"></td>';
+      return `<tr class="erp-group-header-row" data-group-key="${escapeAttr(groupKey)}">
+        <td class="cell-checkbox"></td>
+        <td class="cell-id erp-group-header-id">
+          <button type="button" class="erp-group-toggle" data-group-key="${escapeAttr(groupKey)}" aria-expanded="true" aria-label="展开或收起申请">▼</button>
+          <span class="erp-influencer-id-wrap">${idCell}${badge}${email}</span>
+        </td>
+        ${tagsCell}
+        ${emptyCells}
+        <td class="cell-sample-date">${record ? renderInfluencerSampleDateCell(record) : '-'}</td>
+        <td class="erp-group-header-empty"></td>
+      </tr>`;
+    }
+
+    function renderGroupedRecords(records) {
+      recordsCache.clear();
+      influencerAuditAppsCache.clear();
+      const map = new Map();
+      records.forEach((r) => {
+        cacheInfluencerAuditApps(r);
+        const key = String(r.influencer_id || 'unknown');
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(r);
+      });
+
+      const groups = [...map.entries()].map(([key, items]) => {
+        const sortedItems = [...items].sort((a, b) => compareRecordsForSort(a, b, sortField, sortOrder));
+        return [key, sortedItems];
+      });
+
+      groups.sort((a, b) => {
+        if (applyPinSort) {
+          const ap = Number(a[1][0]?.pinned || 0);
+          const bp = Number(b[1][0]?.pinned || 0);
+          if (ap !== bp) return bp - ap;
+          if (ap && bp) {
+            const pinCmp = String(b[1][0]?.pinned_at || '').localeCompare(String(a[1][0]?.pinned_at || ''));
+            if (pinCmp !== 0) return pinCmp;
+          }
+        }
+        return compareRecordsForSort(a[1][0], b[1][0], sortField, sortOrder);
+      });
+
+      return groups.map(([key, items]) => {
+        if (items.length === 1) return renderRecordRow(items[0]);
+        const mixedAudit = Boolean(items[0]?.influencer_mixed_audit);
+        let html = renderGroupHeader(key, items.length, key, mixedAudit, items[0].pinned, items[0]);
+        items.forEach((item) => { html += renderRecordRow(item, { showInfluencer: false, groupKey: key, hidden: false }); });
+        return html;
+      }).join('');
+    }
+
+    function bindEvents() {
+      const dropZone = document.getElementById('dropZone');
+      const fileInput = document.getElementById('fileInput');
+      document.getElementById('toggleImportBtn').addEventListener('click', () => toggleImportPanel());
+      document.getElementById('cancelImportBtn')?.addEventListener('click', () => {
+        resetImportForm();
+        toggleImportPanel(false);
+      });
+      dropZone.addEventListener('click', () => fileInput.click());
+      dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+      dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFile(e.dataTransfer.files[0]); });
+      fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+      document.getElementById('uploadBtn').addEventListener('click', uploadFile);
+      document.getElementById('batchAssignBtn')?.addEventListener('click', openBatchAssignModal);
+      document.getElementById('batchDeleteBtn')?.addEventListener('click', submitBatchDelete);
+      document.getElementById('batchTagsBtn')?.addEventListener('click', openBatchTagsModal);
+      document.getElementById('scrapeEmailBtn')?.addEventListener('click', submitScrapeEmails);
+      bindStaffMailSettingsModal();
+      bindBatchEmailModal({
+        bindKey: 'pending',
+        apiPath: '/api/records/batch-email',
+        validateSelection: () => {
+          if (!getSelectedCount()) return '请先勾选要发邮件的申请';
+          return '';
+        },
+        getPreviewRows: () => getUniqueInfluencerRowsForBatchEmail(),
+        onOpen: (settings) => {
+          const rows = getUniqueInfluencerRowsForBatchEmail();
+          const validCount = rows.filter((row) => isValidRecipientEmailClient(row.email)).length;
+          document.getElementById('batchEmailHint').textContent = `已选 ${getSelectedCount()} 条申请，对应 ${rows.length} 位达人，其中 ${validCount} 位有有效邮箱`;
+          document.getElementById('batchEmailMailHint').textContent = `将使用 ${settings.smtp_email} 逐封发送（每人单独收到，最多 ${settings.max_batch_count || 50} 封/次）`;
+        },
+        buildPayload: ({ subject, body }) => ({
+          subject,
+          body,
+          scope: allResultsSelected ? 'all' : 'page',
+          record_ids: allResultsSelected ? [] : [...selectedIds],
+          filters: getBatchFilters(),
+        }),
+        onSent: () => loadRecords(),
+      });
+      document.getElementById('cancelBatchTagsBtn')?.addEventListener('click', closeBatchTagsModal);
+      document.getElementById('confirmBatchTagsBtn')?.addEventListener('click', submitBatchTags);
+      document.getElementById('cancelBatchAssignBtn')?.addEventListener('click', closeBatchAssignModal);
+      document.getElementById('confirmBatchAssignBtn')?.addEventListener('click', submitBatchAssign);
+      document.getElementById('searchBtn').addEventListener('click', () => { currentPage = 1; resetSelection(false); loadRecords(); });
+      document.getElementById('resetBtn').addEventListener('click', async () => {
+        document.getElementById('filterInfluencerId').value = '';
+        document.getElementById('filterCommission').value = '';
+        document.getElementById('filterTags').value = '';
+        if (document.getElementById('filterAssignee')) document.getElementById('filterAssignee').value = '';
+        document.getElementById('filterImportedBy').value = '';
+        document.getElementById('filterShopName').value = '';
+        urlAssignee = '';
+        urlSampleDateFrom = '';
+        urlSampleDateTo = '';
+        urlAuditDateFrom = '';
+        urlAuditDateTo = '';
+        sortField = 'import_batch_time';
+        sortOrder = 'desc';
+        applyPinSort = true;
+        currentPage = 1;
+        resetSelection(false);
+        await loadFilterOptions();
+        loadRecords();
+      });
+      document.getElementById('exportBtn').addEventListener('click', () => { window.location.href = `/api/export${buildQueryString(getFilters())}`; });
+      document.getElementById('prevPageBtn').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadRecords(); } });
+      document.getElementById('nextPageBtn').addEventListener('click', () => { if (currentPage < totalPages) { currentPage++; loadRecords(); } });
+      ['influencer_id', 'import_batch_time', 'commission'].forEach((field) => {
+        document.querySelector(`.erp-sort-indicator[data-field="${field}"]`)?.closest('th')?.addEventListener('click', () => toggleSort(field));
+      });
+      document.getElementById('auditTabs').addEventListener('click', (e) => {
+        const tab = e.target.closest('.erp-tab');
+        if (!tab) return;
+        currentTab = tab.dataset.tab;
+        currentPage = 1;
+        resetSelection(false);
+        document.querySelectorAll('.erp-tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === currentTab));
+        loadRecords();
+      });
+      document.getElementById('detailCloseBtn').addEventListener('click', () => document.getElementById('detailModal').classList.add('hidden'));
+      document.getElementById('auditAppsModalCloseBtn').addEventListener('click', closeAuditApplicationsModal);
+      document.getElementById('auditAppsModal').addEventListener('click', (e) => {
+        if (e.target.id === 'auditAppsModal') closeAuditApplicationsModal();
+      });
+      document.getElementById('recordTableBody').addEventListener('click', (e) => {
+        const badge = e.target.closest('.erp-audit-app-badge');
+        if (!badge) return;
+        e.preventDefault();
+        e.stopPropagation();
+        showAuditApplicationsModal(badge.dataset.influencerId);
+      });
+      document.getElementById('importCloseBtn').addEventListener('click', () => { document.getElementById('importModal').classList.add('hidden'); loadFilterOptions(); loadRecords(); });
+      document.getElementById('filterInfluencerId').addEventListener('keydown', (e) => { if (e.key === 'Enter') { currentPage = 1; resetSelection(false); loadRecords(); } });
+      document.getElementById('filterCommission').addEventListener('change', () => { currentPage = 1; resetSelection(false); loadRecords(); });
+      document.getElementById('filterTags').addEventListener('change', () => { currentPage = 1; resetSelection(false); loadRecords(); });
+      document.getElementById('filterAssignee')?.addEventListener('change', () => { urlAssignee = ''; currentPage = 1; resetSelection(false); loadRecords(); });
+      document.getElementById('filterImportBatch')?.addEventListener('change', () => { currentPage = 1; resetSelection(false); loadRecords(); });
+      document.getElementById('filterImportedBy')?.addEventListener('change', () => { currentPage = 1; resetSelection(false); loadRecords(); });
+      document.getElementById('filterShopName')?.addEventListener('change', () => { currentPage = 1; resetSelection(false); loadRecords(); });
+      bindPinButtons(document, () => loadRecords());
+    }
+
+    function bindRowCheckboxEvents() {
+      document.querySelectorAll('.row-checkbox').forEach((box) => {
+        box.addEventListener('change', () => {
+          const id = Number(box.dataset.id);
+          if (allResultsSelected) {
+            allResultsSelected = false;
+            selectedIds = new Set(lastLoadedRecords.map((item) => item.id));
+          }
+          if (box.checked) selectedIds.add(id);
+          else selectedIds.delete(id);
+          syncHeaderCheckbox();
+        });
+      });
+    }
+
+    function handleFile(file) {
+      if (!file) return;
+      if (!isAllowedImportFile(file)) return alert(`仅支持 ${IMPORT_FILE_LABEL}`);
+      selectedFile = file;
+      document.getElementById('fileName').textContent = '已选择：' + file.name;
+      document.getElementById('fileName').classList.remove('hidden-text');
+      document.getElementById('uploadBtn').disabled = false;
+    }
+
+    async function uploadFile() {
+      if (!selectedFile) return;
+      const btn = document.getElementById('uploadBtn');
+      btn.disabled = true;
+      btn.textContent = '导入中...';
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      try {
+        const res = await fetch('/upload', { method: 'POST', body: formData, credentials: 'same-origin' });
+        const data = await res.json();
+        if (!res.ok) return alert(data.message || '导入失败');
+        document.getElementById('importMessage').textContent = `共解析 ${data.total} 条，新入库 ${data.inserted} 条，过滤重复 ${data.skipped} 条`;
+        document.getElementById('importModal').classList.remove('hidden');
+      } catch {
+        alert('导入失败');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '开始导入';
+        resetImportForm();
+        toggleImportPanel(false);
+      }
+    }
+
+    async function loadStaffOptions() {
+      if (staffOptions.length) return staffOptions;
+      const { res, data } = await api('/api/staff');
+      if (!res.ok) throw new Error(data.message || '获取人员列表失败');
+      staffOptions = (data.data || []).filter((item) => item.name !== 'admin');
+      return staffOptions;
+    }
+
+    function renderAssigneeCheckboxList(staff) {
+      return staff.map((item) => `
+        <label class="erp-checkbox-item">
+          <input type="checkbox" class="batch-assignee-checkbox" value="${escapeAttr(item.name)}" />
+          <span>${escapeHtml(item.name)}${item.commission_rate ? `（${escapeHtml(item.commission_rate)}）` : ''}</span>
+        </label>
+      `).join('');
+    }
+
+    function getSelectedAssignees() {
+      return [...document.querySelectorAll('.batch-assignee-checkbox:checked')].map((el) => el.value.trim()).filter(Boolean);
+    }
+
+    function countSelectedInfluencers() {
+      if (allResultsSelected) return null;
+      const ids = new Set();
+      lastLoadedRecords.forEach((item) => {
+        if (isRowChecked(item.id)) ids.add(String(item.influencer_id || ''));
+      });
+      return ids.size;
+    }
+
+    async function openBatchAssignModal() {
+      const count = getSelectedCount();
+      if (!count) return alert('请先勾选要分配的记录');
+      try {
+        const staff = await loadStaffOptions();
+        document.getElementById('batchAssigneeList').innerHTML = renderAssigneeCheckboxList(staff);
+        const influencerCount = countSelectedInfluencers();
+        const hint =
+          influencerCount == null
+            ? `已选 ${count} 条记录，将按达人平均分配给所选负责人（同一达人的全部申请将分配给同一位负责人）`
+            : `已选 ${count} 条记录（${influencerCount} 位达人），将按达人平均分配给所选负责人（同一达人的全部申请将分配给同一位负责人）`;
+        document.getElementById('batchAssignHint').textContent = hint;
+        document.getElementById('batchAssignModal').classList.remove('hidden');
+      } catch (err) {
+        alert(err.message || '无法打开分配窗口');
+      }
+    }
+
+    function closeBatchAssignModal() {
+      document.getElementById('batchAssignModal').classList.add('hidden');
+    }
+
+    function openBatchTagsModal() {
+      const count = getSelectedCount();
+      if (!count) return alert('请先勾选要设置标签的记录');
+      const influencerCount = countSelectedInfluencers();
+      const hint =
+        influencerCount == null
+          ? `已选 ${count} 条记录，将按达人批量设置标签（同一达人的全部申请将同步）`
+          : `已选 ${count} 条记录（${influencerCount} 位达人），将按达人批量设置标签（同一达人的全部申请将同步）`;
+      document.getElementById('batchTagsHint').textContent = hint;
+      document.getElementById('batchTagsMode').value = 'replace';
+      document.getElementById('batchTagsInput').value = '';
+      document.getElementById('batchTagsModal').classList.remove('hidden');
+    }
+
+    function closeBatchTagsModal() {
+      document.getElementById('batchTagsModal').classList.add('hidden');
+    }
+
+    async function submitScrapeEmails() {
+      const count = getSelectedCount();
+      if (!count) return alert('请先勾选要抓取邮箱的达人');
+      const btn = document.getElementById('scrapeEmailBtn');
+      btn.disabled = true;
+      const oldText = btn.textContent;
+      try {
+        const data = await runInfluencerEmailScrapeFlow({
+          source: 'records',
+          scope: allResultsSelected ? 'all' : 'page',
+          recordIds: allResultsSelected ? [] : [...selectedIds],
+          filters: getBatchFilters(),
+          onStatus: (text) => {
+            btn.textContent = text;
+          },
+        });
+        if (data.message) alert(data.message);
+        else alert(formatScrapeEmailResultMessage(data));
+        loadRecords();
+      } catch (err) {
+        alert(err.message || '抓取邮箱失败');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = oldText;
+      }
+    }
+
+    async function submitBatchTags() {
+      const mode = document.getElementById('batchTagsMode').value;
+      const tags = document.getElementById('batchTagsInput').value.trim();
+      const count = getSelectedCount();
+      if (!count) return alert('请先勾选要设置标签的记录');
+      if (mode !== 'replace' && !tags) {
+        return alert(mode === 'add' ? '请输入要追加的标签' : '请输入要移除的标签');
+      }
+
+      const payload = {
+        mode,
+        tags,
+        scope: allResultsSelected ? 'all' : 'page',
+        record_ids: allResultsSelected ? [] : [...selectedIds],
+        filters: getBatchFilters(),
+      };
+
+      const btn = document.getElementById('confirmBatchTagsBtn');
+      btn.disabled = true;
+      btn.textContent = '保存中...';
+      try {
+        const { res, data } = await api('/api/records/batch-tags', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) return alert(data.message || '批量设置标签失败');
+        alert(`已成功更新 ${data.updated} 位达人的标签`);
+        closeBatchTagsModal();
+        resetSelection(false);
+        await loadFilterOptions();
+        loadRecords();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '确认';
+      }
+    }
+
+    async function submitBatchAssign() {
+      const assignees = getSelectedAssignees();
+      const count = getSelectedCount();
+      if (!assignees.length) return alert('请至少选择一位负责人');
+      if (!count) return alert('请先勾选要分配的记录');
+
+      const payload = {
+        assignees,
+        scope: allResultsSelected ? 'all' : 'page',
+        record_ids: allResultsSelected ? [] : [...selectedIds],
+        filters: getBatchFilters(),
+      };
+
+      const btn = document.getElementById('confirmBatchAssignBtn');
+      btn.disabled = true;
+      btn.textContent = '分配中...';
+      try {
+        const { res, data } = await api('/api/records/batch-assign', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) return alert(data.message || '分配失败');
+        alert(`已成功将 ${data.updated} 位达人平均分配给 ${assignees.join('、')}`);
+        closeBatchAssignModal();
+        resetSelection(false);
+        loadRecords();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '确认分配';
+      }
+    }
+
+    async function submitBatchDelete() {
+      const count = getSelectedCount();
+      if (!count) return alert('请先勾选要删除的记录');
+      if (!confirm(`确定要删除选中的 ${count} 条达人记录吗？此操作不可恢复。`)) return;
+
+      const payload = {
+        scope: allResultsSelected ? 'all' : 'page',
+        record_ids: allResultsSelected ? [] : [...selectedIds],
+        filters: getBatchFilters(),
+      };
+
+      const btn = document.getElementById('batchDeleteBtn');
+      btn.disabled = true;
+      const oldText = btn.textContent;
+      btn.textContent = '删除中...';
+      try {
+        const { res, data } = await api('/api/records/batch-delete', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) return alert(data.message || '删除失败');
+        alert(`已成功删除 ${data.deleted} 条记录`);
+        resetSelection(false);
+        loadFilterOptions();
+        loadRecords();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = oldText;
+      }
+    }
+
+    async function loadRecords() {
+      const { res, data } = await api(`/api/records${buildQueryString(getFilters())}`);
+      const tbody = document.getElementById('recordTableBody');
+      if (!res.ok) {
+        tbody.innerHTML = `<tr><td colspan="${COLUMN_COUNT}" class="erp-empty">加载失败</td></tr>`;
+        return;
+      }
+      document.getElementById('countAll').textContent = data.tabCounts?.all ?? 0;
+      document.getElementById('countPending').textContent = data.tabCounts?.pending ?? 0;
+      document.getElementById('countTentative').textContent = data.tabCounts?.tentative ?? 0;
+      document.getElementById('countApproved').textContent = data.tabCounts?.approved ?? 0;
+      document.getElementById('countRejected').textContent = data.tabCounts?.rejected ?? 0;
+      totalPages = data.totalPages || 1;
+      lastLoadedRecords = data.data || [];
+      lastTotal = data.total || 0;
+      updateSelectAllMenuCounts();
+      const influencerCountOnPage = new Set((data.data || []).map((item) => String(item.influencer_id || ''))).size;
+      const totalInfluencers = data.totalInfluencers ?? influencerCountOnPage;
+      document.getElementById('pageInfo').textContent =
+        `第 ${data.page} / ${totalPages} 页，本页 ${influencerCountOnPage} 位达人 ${data.data.length} 条申请，共 ${totalInfluencers} 位达人 ${data.total} 条申请`;
+      document.getElementById('prevPageBtn').disabled = data.page <= 1;
+      document.getElementById('nextPageBtn').disabled = data.page >= totalPages;
+      updateSortIndicators();
+      if (!data.data.length) {
+        tbody.innerHTML = `<tr><td colspan="${COLUMN_COUNT}" class="erp-empty">暂无记录</td></tr>`;
+        syncHeaderCheckbox();
+        return;
+      }
+      tbody.innerHTML = renderGroupedRecords(data.data);
+      document.querySelectorAll('.erp-group-toggle').forEach((btn) => btn.addEventListener('click', () => {
+        const key = btn.dataset.groupKey;
+        const expanded = btn.getAttribute('aria-expanded') === 'true';
+        document.querySelectorAll(`tr.erp-group-child-row[data-group-key="${CSS.escape(key)}"]`).forEach((row) => row.classList.toggle('is-hidden', expanded));
+        btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+        btn.textContent = expanded ? '▶' : '▼';
+      }));
+      document.querySelectorAll('.view-detail-btn').forEach((btn) => btn.addEventListener('click', () => {
+        const record = recordsCache.get(String(btn.dataset.id));
+        showInfluencerDetailModal({
+          recordId: Number(btn.dataset.id),
+          influencerId: record?.influencer_id || btn.dataset.influencerId || '',
+          defaultTab: 'audit',
+        });
+      }));
+      bindRowCheckboxEvents();
+      syncRowCheckboxes();
+      bindEditableFields();
+      bindTagsCells();
+      bindInfluencerEmailFields();
+    }
+
+    window.onInfluencerEmailSaved = (influencerId, email) => {
+      recordsCache.forEach((record) => {
+        if (String(record.influencer_id || '') === String(influencerId)) {
+          record.email = email;
+        }
+      });
+    };
+
+    window.onInfluencerIdRenamed = () => {
+      loadRecords();
+    };
+
+    function bindEditableFields() {
+      document.querySelectorAll('.editable-field').forEach((input) => {
+        input.dataset.lastSaved = input.value.trim();
+        input.addEventListener('input', () => scheduleSave(input));
+        input.addEventListener('blur', () => saveField(input));
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } });
+      });
+    }
+
+    async function saveField(input) {
+      const timerKey = `${input.dataset.id}-${input.dataset.field}`;
+      if (saveTimers.has(timerKey)) {
+        clearTimeout(saveTimers.get(timerKey));
+        saveTimers.delete(timerKey);
+      }
+      if (input.dataset.lastSaved === input.value.trim()) return;
+      const { res, data } = await api(`/api/records/${input.dataset.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ [input.dataset.field]: input.value.trim() }),
+      });
+      if (!res.ok) return alert(data.message || '保存失败');
+      input.dataset.lastSaved = input.value.trim();
+      if (input.dataset.field === 'audit_reason') {
+        input.title = input.value.trim();
+      }
+      const cached = recordsCache.get(String(input.dataset.id));
+      if (cached) cached[input.dataset.field] = input.value.trim();
+    }
+
+    function scheduleSave(input) {
+      const timerKey = `${input.dataset.id}-${input.dataset.field}`;
+      if (saveTimers.has(timerKey)) clearTimeout(saveTimers.get(timerKey));
+      saveTimers.set(timerKey, setTimeout(() => { saveTimers.delete(timerKey); saveField(input); }, 600));
+    }
+
+    init();
+  </script>
+</body>
+</html>

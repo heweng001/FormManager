@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>发送记录 - LUJIFO跨境电商ERP系统</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <script src="/js/common.js"></script>
+  <script>
+    let currentPage = 1;
+    let totalPages = 1;
+
+    async function init() {
+      await requireLogin();
+      document.title = '发送记录 - LUJIFO跨境电商ERP系统';
+      renderShell({
+        active: 'email-history',
+        breadcrumb: '一级菜单 / <strong>达人</strong> / <strong>发送记录</strong>',
+        meta: isManager() ? '全部人员的群发记录' : '我的群发记录',
+        content: `
+          <div class="erp-page-header erp-page-header-compact">
+            <h1 class="erp-page-title erp-page-title-inline">发送记录<span class="erp-page-desc-inline"> — 查看历史群发邮件批次及每位达人的发送结果。</span></h1>
+          </div>
+          <div class="erp-card">
+            <div class="erp-table-wrap">
+              <table class="erp-table">
+                <thead><tr>
+                  <th>发送时间</th>
+                  <th>发件人</th>
+                  <th>发件邮箱</th>
+                  <th>主题</th>
+                  <th>成功</th>
+                  <th>失败</th>
+                  <th>跳过</th>
+                  <th>操作</th>
+                </tr></thead>
+                <tbody id="emailBatchBody"><tr><td colspan="8" class="erp-empty">加载中...</td></tr></tbody>
+              </table>
+            </div>
+            <div class="erp-pagination">
+              <span id="pageInfo">第 1 / 1 页，共 0 条</span>
+              <div class="erp-pagination-actions">
+                <button id="prevPageBtn" class="erp-btn erp-btn-secondary" disabled>上一页</button>
+                <button id="nextPageBtn" class="erp-btn erp-btn-secondary" disabled>下一页</button>
+              </div>
+            </div>
+          </div>
+          <div id="emailBatchDetailModal" class="erp-modal-overlay hidden">
+            <div class="erp-modal erp-modal-wide">
+              <div class="erp-modal-header" id="emailBatchDetailTitle">发送明细</div>
+              <div class="erp-modal-body">
+                <p id="emailBatchDetailMeta" class="erp-meta" style="margin-bottom:10px;"></p>
+                <div class="erp-table-wrap">
+                  <table class="erp-table">
+                    <thead><tr>
+                      <th>达人 id</th>
+                      <th>收件邮箱</th>
+                      <th>状态</th>
+                      <th>发送时间</th>
+                      <th>主题</th>
+                      <th>失败原因</th>
+                    </tr></thead>
+                    <tbody id="emailBatchDetailBody"><tr><td colspan="6" class="erp-empty">加载中...</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="erp-modal-footer">
+                <button class="erp-btn erp-btn-primary" id="closeEmailBatchDetailBtn">关闭</button>
+              </div>
+            </div>
+          </div>
+        `,
+      });
+      document.getElementById('prevPageBtn').addEventListener('click', () => {
+        if (currentPage > 1) {
+          currentPage -= 1;
+          loadBatches();
+        }
+      });
+      document.getElementById('nextPageBtn').addEventListener('click', () => {
+        if (currentPage < totalPages) {
+          currentPage += 1;
+          loadBatches();
+        }
+      });
+      document.getElementById('closeEmailBatchDetailBtn').addEventListener('click', closeBatchDetailModal);
+      loadBatches();
+    }
+
+    function renderEmailLogStatusBadge(status) {
+      const value = String(status || '').trim();
+      if (value === 'sent') return '<span class="erp-email-log-status erp-email-log-status--sent">成功</span>';
+      if (value === 'failed') return '<span class="erp-email-log-status erp-email-log-status--failed">失败</span>';
+      if (value === 'skipped') return '<span class="erp-email-log-status erp-email-log-status--skipped">跳过</span>';
+      return escapeHtml(value || '-');
+    }
+
+    async function loadBatches() {
+      const tbody = document.getElementById('emailBatchBody');
+      const { res, data } = await api(`/api/email-batches?page=${currentPage}&pageSize=20`);
+      if (!res.ok) {
+        tbody.innerHTML = `<tr><td colspan="8" class="erp-empty">${escapeHtml(data.message || '加载失败')}</td></tr>`;
+        return;
+      }
+      const rows = data.rows || [];
+      totalPages = data.totalPages || 1;
+      document.getElementById('pageInfo').textContent = `第 ${data.page} / ${totalPages} 页，共 ${data.total || 0} 条`;
+      document.getElementById('prevPageBtn').disabled = data.page <= 1;
+      document.getElementById('nextPageBtn').disabled = data.page >= totalPages;
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="erp-empty">暂无发送记录</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map((row) => `
+        <tr>
+          <td class="cell-import-time">${escapeHtml(row.created_at || '-')}</td>
+          <td>${escapeHtml(row.created_by || '-')}</td>
+          <td>${escapeHtml(row.sender_email || '-')}</td>
+          <td class="cell-truncate" title="${escapeAttr(row.subject_template || '')}">${escapeHtml(row.subject_template || '-')}</td>
+          <td><span class="erp-email-log-status erp-email-log-status--sent">${escapeHtml(String(row.success_count ?? 0))}</span></td>
+          <td><span class="erp-email-log-status erp-email-log-status--failed">${escapeHtml(String(row.failed_count ?? 0))}</span></td>
+          <td><span class="erp-email-log-status erp-email-log-status--skipped">${escapeHtml(String(row.skipped_count ?? 0))}</span></td>
+          <td><button type="button" class="erp-btn erp-btn-secondary erp-btn-view" data-batch-id="${row.id}">查看明细</button></td>
+        </tr>
+      `).join('');
+      tbody.querySelectorAll('[data-batch-id]').forEach((btn) => {
+        btn.addEventListener('click', () => openBatchDetail(Number(btn.dataset.batchId)));
+      });
+    }
+
+    function closeBatchDetailModal() {
+      document.getElementById('emailBatchDetailModal')?.classList.add('hidden');
+    }
+
+    async function openBatchDetail(batchId) {
+      const modal = document.getElementById('emailBatchDetailModal');
+      const body = document.getElementById('emailBatchDetailBody');
+      modal.classList.remove('hidden');
+      document.getElementById('emailBatchDetailTitle').textContent = `发送明细 #${batchId}`;
+      document.getElementById('emailBatchDetailMeta').textContent = '加载中...';
+      body.innerHTML = '<tr><td colspan="6" class="erp-empty">加载中...</td></tr>';
+      const { res, data } = await api(`/api/email-batches/${batchId}`);
+      if (!res.ok) {
+        document.getElementById('emailBatchDetailMeta').textContent = data.message || '加载失败';
+        body.innerHTML = '<tr><td colspan="6" class="erp-empty">加载失败</td></tr>';
+        return;
+      }
+      const batch = data.data?.batch || {};
+      const logs = data.data?.logs || [];
+      document.getElementById('emailBatchDetailMeta').textContent =
+        `发送时间 ${batch.created_at || '-'} · 发件人 ${batch.created_by || '-'} · 发件邮箱 ${batch.sender_email || '-'} · 成功 ${batch.success_count || 0} / 失败 ${batch.failed_count || 0} / 跳过 ${batch.skipped_count || 0}`;
+      if (!logs.length) {
+        body.innerHTML = '<tr><td colspan="6" class="erp-empty">暂无明细</td></tr>';
+        return;
+      }
+      body.innerHTML = logs.map((log) => `
+        <tr>
+          <td>${escapeHtml(log.influencer_id || '-')}</td>
+          <td>${escapeHtml(log.to_email || '-')}</td>
+          <td>${renderEmailLogStatusBadge(log.status)}</td>
+          <td class="cell-import-time">${escapeHtml(log.sent_at || '-')}</td>
+          <td class="cell-truncate" title="${escapeAttr(log.subject || '')}">${escapeHtml(log.subject || '-')}</td>
+          <td class="cell-truncate" title="${escapeAttr(log.error_message || '')}">${escapeHtml(log.error_message || '-')}</td>
+        </tr>
+      `).join('');
+    }
+
+    init();
+  </script>
+</body>
+</html>

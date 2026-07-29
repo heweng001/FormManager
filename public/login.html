@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 - LUJIFO跨境电商ERP系统</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="login-page">
+  <div class="login-card">
+    <div class="login-brand">LUJIFO</div>
+    <h1 class="login-title">跨境电商 ERP 系统</h1>
+    <p class="login-sub">请使用账号密码登录</p>
+    <form id="loginForm" autocomplete="on">
+      <div class="erp-form-field">
+        <label>账号</label>
+        <input id="loginName" name="erp-account" class="erp-input erp-input-wide" placeholder="请输入账号" autocomplete="username" required />
+      </div>
+      <div class="erp-form-field">
+        <label>密码</label>
+        <input id="loginPassword" name="password" type="password" class="erp-input erp-input-wide" autocomplete="current-password" required />
+      </div>
+      <p id="loginError" class="login-error hidden" role="alert"></p>
+      <button type="submit" class="erp-btn erp-btn-primary login-btn" id="loginSubmitBtn">登录</button>
+    </form>
+    <p class="login-hint">管理员账号：admin</p>
+  </div>
+  <script>
+    const loginError = document.getElementById('loginError');
+    const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+
+    function showLoginError(message) {
+      loginError.textContent = message || '登录失败';
+      loginError.classList.remove('hidden');
+    }
+
+    function clearLoginError() {
+      loginError.textContent = '';
+      loginError.classList.add('hidden');
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearLoginError();
+
+      const name = document.getElementById('loginName').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      if (!name || !password) {
+        showLoginError('请输入账号和密码');
+        return;
+      }
+
+      loginSubmitBtn.disabled = true;
+      loginSubmitBtn.textContent = '登录中...';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ name, password }),
+        });
+
+        let data = {};
+        try {
+          data = await res.json();
+        } catch {
+          data = {};
+        }
+
+        if (!res.ok) {
+          showLoginError(data.message || '登录失败');
+          return;
+        }
+
+        window.location.href = '/influencers.html';
+      } catch {
+        showLoginError('网络错误，请稍后重试');
+      } finally {
+        loginSubmitBtn.disabled = false;
+        loginSubmitBtn.textContent = '登录';
+      }
+    });
+  </script>
+</body>
+</html>

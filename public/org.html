@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>组织 - LUJIFO跨境电商ERP系统</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <script src="/js/common.js"></script>
+  <script>
+    let editingId = null;
+    let staffList = [];
+
+    async function init() {
+      await requireLogin();
+      if (!isManager()) {
+        alert('无权限访问组织管理');
+        window.location.href = '/wiki.html';
+        return;
+      }
+      renderShell({
+        active: 'org',
+        breadcrumb: '一级菜单 / <strong>组织</strong>',
+        meta: '人员与权限管理',
+        content: `
+          <div class="erp-page-header erp-page-header-row">
+            <div><h1 class="erp-page-title">组织人员管理</h1><p class="erp-page-desc">管理人员账号、佣金率、汇报关系与权限。姓名与佣金率均不可重复。</p></div>
+            <button id="newStaffBtn" class="erp-btn erp-btn-primary">新增人员</button>
+          </div>
+          <div class="erp-card">
+            <div class="erp-table-wrap">
+              <table class="erp-table">
+                <thead><tr><th>姓名</th><th>佣金率</th><th>汇报上级</th><th>权限</th><th>创建时间</th><th>操作</th></tr></thead>
+                <tbody id="staffTableBody"><tr><td colspan="6" class="erp-empty">加载中...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="staffModal" class="erp-modal-overlay hidden">
+            <div class="erp-modal erp-modal-wide">
+              <div class="erp-modal-header" id="staffModalTitle">新增人员</div>
+              <div class="erp-modal-body">
+                <div class="erp-form-field"><label>姓名（唯一）</label><input id="staffName" class="erp-input erp-input-wide" /></div>
+                <div class="erp-form-field"><label>登录密码</label><input id="staffPassword" type="password" class="erp-input erp-input-wide" placeholder="编辑时留空则不修改" /></div>
+                <div class="erp-form-field"><label>佣金率（唯一）</label><input id="staffCommission" class="erp-input erp-input-wide" placeholder="如 15.03%" /></div>
+                <div class="erp-form-field"><label>汇报上级</label><select id="staffSupervisor" class="erp-input erp-input-wide"><option value="">无</option></select></div>
+                <div class="erp-form-field"><label>权限</label><select id="staffRole" class="erp-input erp-input-wide"><option value="employee">员工</option><option value="manager">主管</option></select></div>
+              </div>
+              <div class="erp-modal-footer">
+                <button class="erp-btn erp-btn-secondary" id="cancelStaffBtn">取消</button>
+                <button class="erp-btn erp-btn-primary" id="saveStaffBtn">保存</button>
+              </div>
+            </div>
+          </div>
+        `,
+      });
+      document.getElementById('newStaffBtn').addEventListener('click', () => openStaffModal());
+      document.getElementById('cancelStaffBtn').addEventListener('click', closeStaffModal);
+      document.getElementById('saveStaffBtn').addEventListener('click', saveStaff);
+      loadStaff();
+    }
+
+    function roleLabel(role) {
+      return role === 'manager' ? '主管' : '员工';
+    }
+
+    async function loadStaff() {
+      const { res, data } = await api('/api/staff');
+      const tbody = document.getElementById('staffTableBody');
+      if (!res.ok) {
+        tbody.innerHTML = `<tr><td colspan="6" class="erp-empty">加载失败：${escapeHtml(data.message || '无权限或网络错误')}</td></tr>`;
+        return;
+      }
+      staffList = Array.isArray(data.data) ? data.data : [];
+      if (!staffList.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="erp-empty">暂无人员</td></tr>';
+        return;
+      }
+      tbody.innerHTML = staffList.map((item) => `
+        <tr>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(item.commission_rate || '-')}</td>
+          <td>${escapeHtml(item.supervisor_name || '-')}</td>
+          <td>${roleLabel(item.role)}</td>
+          <td class="cell-muted">${formatDateTime(item.create_time)}</td>
+          <td>
+            ${item.name !== 'admin' ? `<button class="erp-btn erp-btn-secondary erp-btn-view" data-edit="${item.id}">编辑</button>
+            <button class="erp-btn erp-btn-danger erp-btn-view" data-del="${item.id}" data-name="${escapeAttr(item.name)}">删除</button>` : '<span class="cell-muted">系统账号</span>'}
+          </td>
+        </tr>
+      `).join('');
+      tbody.querySelectorAll('[data-edit]').forEach((btn) => btn.addEventListener('click', () => openStaffModal(btn.dataset.edit)));
+      tbody.querySelectorAll('[data-del]').forEach((btn) => btn.addEventListener('click', () => deleteStaff(btn.dataset.del, btn.dataset.name)));
+    }
+
+    function fillSupervisorOptions(selectedId, excludeId) {
+      const select = document.getElementById('staffSupervisor');
+      select.innerHTML = '<option value="">无</option>';
+      staffList
+        .filter((s) => s.id !== excludeId)
+        .forEach((s) => {
+          const opt = document.createElement('option');
+          opt.value = s.id;
+          opt.textContent = s.name;
+          if (String(selectedId) === String(s.id)) opt.selected = true;
+          select.appendChild(opt);
+        });
+    }
+
+    function openStaffModal(id) {
+      editingId = id || null;
+      document.getElementById('staffModal').classList.remove('hidden');
+      document.getElementById('staffModalTitle').textContent = id ? '编辑人员' : '新增人员';
+      if (id) {
+        const item = staffList.find((s) => String(s.id) === String(id));
+        document.getElementById('staffName').value = item.name;
+        document.getElementById('staffPassword').value = '';
+        document.getElementById('staffCommission').value = item.commission_rate || '';
+        document.getElementById('staffRole').value = item.role;
+        fillSupervisorOptions(item.supervisor_id, item.id);
+      } else {
+        document.getElementById('staffName').value = '';
+        document.getElementById('staffPassword').value = '';
+        document.getElementById('staffCommission').value = '';
+        document.getElementById('staffRole').value = 'employee';
+        fillSupervisorOptions('', null);
+      }
+    }
+
+    function closeStaffModal() {
+      document.getElementById('staffModal').classList.add('hidden');
+      editingId = null;
+    }
+
+    async function saveStaff() {
+      const payload = {
+        name: document.getElementById('staffName').value.trim(),
+        password: document.getElementById('staffPassword').value,
+        commission_rate: document.getElementById('staffCommission').value.trim(),
+        supervisor_id: document.getElementById('staffSupervisor').value || null,
+        role: document.getElementById('staffRole').value,
+      };
+      if (!payload.name) return alert('姓名不能为空');
+      if (!editingId && !payload.password) return alert('请设置登录密码');
+      const url = editingId ? `/api/staff/${editingId}` : '/api/staff';
+      const method = editingId ? 'PUT' : 'POST';
+      const { res, data } = await api(url, { method, body: JSON.stringify(payload) });
+      if (!res.ok) return alert(data.message || '保存失败');
+      closeStaffModal();
+      loadStaff();
+    }
+
+    async function deleteStaff(id, name) {
+      const label = name ? `「${name}」` : '该人员';
+      if (!confirm(`确定要删除人员${label}吗？此操作不可恢复。`)) return;
+      const { res, data } = await api(`/api/staff/${id}`, { method: 'DELETE' });
+      if (!res.ok) return alert(data.message || '删除失败');
+      loadStaff();
+    }
+
+    init();
+  </script>
+</body>
+</html>

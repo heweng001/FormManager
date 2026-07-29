@@ -1,0 +1,7 @@
+node_modules/
+uploads/
+data.db
+backups/
+.env
+*.log
+migrate-bundle.zip
