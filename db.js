@@ -882,6 +882,9 @@ async function initDatabase() {
   migrateInfluencerProfilesEmail();
   migrateFulfillmentProgressShortLabels();
   migrateRemoveDuplicateSampleTag();
+  migrateRecordsAssignee();
+  migrateRecordsTags();
+  migrateRecordsMeta();
   migrateResyncSampleDatesPerSku();
   migrateInfluencerTagsToProfile();
   migrateStaffMailSettings();
@@ -889,9 +892,6 @@ async function initDatabase() {
   migrateEmailSendLogBatchIds();
   migrateInfluencerIdAliases();
 
-  migrateRecordsAssignee();
-  migrateRecordsTags();
-  migrateRecordsMeta();
   migrateRecordsAuditStatusAt();
   migrateSkuModelsShopName();
   migrateArticlesAuthor();
