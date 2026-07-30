@@ -38,6 +38,12 @@ const INFLUENCER_VIDEO_COLUMNS = [
   { key: 'product_id', label: '商品id', legacyAliases: ['商品id', '商品 ID', 'Product ID', 'product_id'] },
 ];
 
+const INFLUENCER_VIDEO_DISPLAY_COLUMNS = [
+  ...INFLUENCER_VIDEO_COLUMNS,
+  { key: 'order_count', label: '出单数' },
+  { key: 'refund_count', label: '退款数' },
+];
+
 const SAMPLE_ORDER_COLUMNS = [
   { key: 'unique_key', label: '唯一标识', legacyAliases: ['唯一标识', 'Sample Order ID', 'Order ID', '订单 ID'] },
   { key: 'order_id', label: '订单 id', legacyAliases: ['Order ID', 'order id', 'OrderID', '订单 ID', '订单id'] },
@@ -143,6 +149,7 @@ if (typeof module !== 'undefined' && module.exports) {
     SAMPLE_ORDER_COLUMNS,
     ALLIANCE_ORDER_COLUMNS,
     INFLUENCER_VIDEO_COLUMNS,
+    INFLUENCER_VIDEO_DISPLAY_COLUMNS,
     RECORD_IMPORT_COLUMNS,
     normalizeOrderFieldKey,
     pickOrderDataField,
@@ -165,6 +172,7 @@ if (typeof window !== 'undefined') {
   window.SAMPLE_ORDER_COLUMNS = SAMPLE_ORDER_COLUMNS;
   window.ALLIANCE_ORDER_COLUMNS = ALLIANCE_ORDER_COLUMNS;
   window.INFLUENCER_VIDEO_COLUMNS = INFLUENCER_VIDEO_COLUMNS;
+  window.INFLUENCER_VIDEO_DISPLAY_COLUMNS = INFLUENCER_VIDEO_DISPLAY_COLUMNS;
   window.RECORD_IMPORT_COLUMNS = RECORD_IMPORT_COLUMNS;
   window.readOrderCellValue = readOrderCellValue;
 }

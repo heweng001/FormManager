@@ -221,6 +221,11 @@ body {
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
 }
 
+input.erp-input.erp-date-input {
+  width: 132px;
+  min-height: 26px;
+}
+
 .erp-input-wide {
   width: 180px;
 }
@@ -2053,6 +2058,12 @@ body {
   white-space: nowrap;
 }
 
+.erp-table-collab .cell-published-video-count {
+  width: 40px;
+  max-width: 42px;
+}
+
+.erp-table-collab .cell-published-video-count,
 .erp-table-collab .cell-video-count,
 .erp-table-collab .cell-order-count,
 .erp-table-collab .cell-refund-count {
@@ -2062,6 +2073,11 @@ body {
   white-space: nowrap;
 }
 
+.erp-table-collab th.cell-published-video-count {
+  max-width: 42px;
+}
+
+.erp-table-collab th.cell-published-video-count,
 .erp-table-collab th.cell-video-count,
 .erp-table-collab th.cell-order-count,
 .erp-table-collab th.cell-refund-count {

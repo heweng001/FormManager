@@ -14,7 +14,7 @@
     const XLSX_ACCEPT = '.xlsx';
     let currentPage = 1;
     let totalPages = 1;
-    const tableColumns = INFLUENCER_VIDEO_COLUMNS;
+    const tableColumns = INFLUENCER_VIDEO_DISPLAY_COLUMNS;
     let selectedFile = null;
     let importPanelOpen = false;
     const rowSelection = createBatchRowSelection({ deleteIdKey: 'video_ids' });
@@ -22,6 +22,7 @@
     let urlAssigneeFilter = '';
     let urlSampleDateFrom = '';
     let urlSampleDateTo = '';
+    let urlPublishAfterSample = '';
 
     async function init() {
       await requireLogin();
@@ -39,8 +40,8 @@
                 <div class="erp-field"><label>内容 id</label><input id="filterContentId" class="erp-input" placeholder="关键词" autocomplete="off" readonly /></div>
                 <div class="erp-field"><label>达人 id</label><input id="filterCreatorUsername" class="erp-input" placeholder="关键词" autocomplete="off" readonly /></div>
                 <div class="erp-field"><label>导入时间</label><select id="filterImportTime" class="erp-input"><option value="">全部</option></select></div>
-                <div class="erp-field"><label>发布开始</label><input id="filterPublishDateFrom" class="erp-input" placeholder="YYYYMMDD" maxlength="8" autocomplete="off" /></div>
-                <div class="erp-field"><label>发布结束</label><input id="filterPublishDateTo" class="erp-input" placeholder="YYYYMMDD" maxlength="8" autocomplete="off" /></div>
+                <div class="erp-field"><label>发布开始</label><input id="filterPublishDateFrom" class="erp-input erp-date-input" type="date" /></div>
+                <div class="erp-field"><label>发布结束</label><input id="filterPublishDateTo" class="erp-input erp-date-input" type="date" /></div>
                 <button id="searchBtn" class="erp-btn erp-btn-primary">查询</button>
                 <button id="resetBtn" class="erp-btn erp-btn-secondary">重置</button>
                 <div class="erp-toolbar-spacer"></div>
@@ -106,11 +107,12 @@
       if (contentId) document.getElementById('filterContentId').value = contentId;
       const publishFrom = params.get('publish_date_from') || '';
       const publishTo = params.get('publish_date_to') || '';
-      if (publishFrom) document.getElementById('filterPublishDateFrom').value = publishFrom;
-      if (publishTo) document.getElementById('filterPublishDateTo').value = publishTo;
+      if (publishFrom) document.getElementById('filterPublishDateFrom').value = ymdToDateInputValue(publishFrom);
+      if (publishTo) document.getElementById('filterPublishDateTo').value = ymdToDateInputValue(publishTo);
       urlAssigneeFilter = params.get('assignee_filter') || '';
       urlSampleDateFrom = params.get('sample_date_from') || '';
       urlSampleDateTo = params.get('sample_date_to') || '';
+      urlPublishAfterSample = params.get('publish_after_sample') === '1' ? '1' : '';
     }
 
     function getBatchFilters() {
@@ -122,12 +124,13 @@
       return {
         content_id: document.getElementById('filterContentId').value.trim(),
         creator_username: document.getElementById('filterCreatorUsername').value.trim(),
-        publish_date_from: document.getElementById('filterPublishDateFrom').value.trim(),
-        publish_date_to: document.getElementById('filterPublishDateTo').value.trim(),
+        publish_date_from: dateInputValueToYmd(document.getElementById('filterPublishDateFrom').value),
+        publish_date_to: dateInputValueToYmd(document.getElementById('filterPublishDateTo').value),
         import_time: document.getElementById('filterImportTime').value.trim(),
         assignee_filter: urlAssigneeFilter,
         sample_date_from: urlSampleDateFrom,
         sample_date_to: urlSampleDateTo,
+        publish_after_sample: urlPublishAfterSample,
         page: currentPage,
         pageSize: PAGE_SIZE,
       };
@@ -305,6 +308,7 @@
         urlAssigneeFilter = '';
         urlSampleDateFrom = '';
         urlSampleDateTo = '';
+        urlPublishAfterSample = '';
         currentPage = 1;
         rowSelection.resetSelection(false);
         loadVideos();

@@ -1260,7 +1260,6 @@ app.get('/api/assignee-stats', requireAuth, async (req, res) => {
 app.get('/api/sample-shipment-stats', requireAuth, async (req, res) => {
   try {
     const filters = {
-      date_preset: toCellValue(req.query.date_preset) || 'recent_30d',
       date_from: toCellValue(req.query.date_from),
       date_to: toCellValue(req.query.date_to),
       include_allocation_tag: toCellValue(req.query.include_allocation_tag) === '1',
@@ -1924,6 +1923,7 @@ app.get('/api/influencer-videos', requireAuth, async (req, res) => {
       assignee_filter: toCellValue(req.query.assignee_filter),
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
+      publish_after_sample: toCellValue(req.query.publish_after_sample),
       page: Math.max(1, parseInt(req.query.page, 10) || 1),
       pageSize: Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50)),
     };
@@ -1952,6 +1952,7 @@ app.get('/api/influencer-videos/filter-options', requireAuth, async (req, res) =
       assignee_filter: toCellValue(req.query.assignee_filter),
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
+      publish_after_sample: toCellValue(req.query.publish_after_sample),
     };
     const options = await getInfluencerVideoImportTimeOptions(filters);
     res.json({ success: true, ...options });

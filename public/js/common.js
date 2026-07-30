@@ -468,6 +468,35 @@ function populateOrderImportTimeFilter(select, items = [], currentValue = '') {
   if (currentValue) select.value = currentValue;
 }
 
+function ymdToDateInputValue(ymd) {
+  const text = String(ymd || '').trim();
+  if (!/^\d{8}$/.test(text)) return '';
+  return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
+}
+
+function dateInputValueToYmd(value) {
+  const text = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
+  return text.replace(/-/g, '');
+}
+
+function shiftLocalYmd(dayOffset) {
+  const date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + dayOffset);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}${m}${d}`;
+}
+
+function getDefaultSampleStatsDateRange() {
+  return {
+    from: shiftLocalYmd(-45),
+    to: shiftLocalYmd(-15),
+  };
+}
+
 function formatPercent(value) {
   const text = String(value || '').trim();
   if (!text) return '-';

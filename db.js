@@ -2109,6 +2109,7 @@ const {
   SAMPLE_ORDER_COLUMNS,
   ALLIANCE_ORDER_COLUMNS,
   INFLUENCER_VIDEO_COLUMNS,
+  INFLUENCER_VIDEO_DISPLAY_COLUMNS,
   RECORD_IMPORT_COLUMNS,
   readOrderFieldFromData,
   buildImportedOrderData,
@@ -2378,6 +2379,28 @@ function mergeAllianceAggRows(aggMap, keys) {
   return merged;
 }
 
+function buildAllianceOrderStatsByContentId() {
+  const statsMap = new Map();
+  queryRows(
+    `
+    SELECT content_id, is_refund, full_refund, payment_time_ymd
+    FROM alliance_orders
+    WHERE TRIM(COALESCE(content_id, '')) != ''
+      AND ${allianceOrderPaymentTimeValidConditions().join(' AND ')}
+    `
+  ).forEach((order) => {
+    const contentId = String(order.content_id || '').trim();
+    if (!contentId) return;
+    if (!statsMap.has(contentId)) {
+      statsMap.set(contentId, { order_count: 0, refund_count: 0 });
+    }
+    const agg = statsMap.get(contentId);
+    agg.order_count += 1;
+    if (isAllianceOrderRefunded(order)) agg.refund_count += 1;
+  });
+  return statsMap;
+}
+
 function buildInfluencerVideoStatsByCreatorKey() {
   const statsMap = new Map();
   queryRows(
@@ -2399,6 +2422,72 @@ function buildInfluencerVideoStatsByCreatorKey() {
     }
   });
   return statsMap;
+}
+
+function buildInfluencerVideosIndexByCreatorKey() {
+  const index = new Map();
+  queryRows(
+    `
+    SELECT creator_username, content_id, publish_date_ymd
+    FROM influencer_videos
+    WHERE TRIM(COALESCE(creator_username, '')) != ''
+    `
+  ).forEach((row) => {
+    const key = normalizeMatchKey(row.creator_username);
+    if (!key) return;
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push({
+      content_id: row.content_id,
+      publish_date_ymd: row.publish_date_ymd,
+    });
+  });
+  return index;
+}
+
+function computePublishedVideoStatsAfterSample(sampledInfluencers, videoIndex) {
+  const contentIds = new Set();
+  let publishedInfluencerCount = 0;
+  sampledInfluencers.forEach((sampleDates, influencerKey) => {
+    const videos = videoIndex.get(influencerKey) || [];
+    const qualifyingIds = new Set();
+    videos.forEach((video) => {
+      const publishYmd = String(video.publish_date_ymd || '').trim();
+      if (!isValidYmd(publishYmd)) return;
+      const publishedAfterSample = [...sampleDates].some((sampleYmd) => publishYmd > sampleYmd);
+      if (!publishedAfterSample) return;
+      const contentId = String(video.content_id || '').trim();
+      if (contentId) qualifyingIds.add(contentId);
+    });
+    if (qualifyingIds.size > 0) publishedInfluencerCount += 1;
+    qualifyingIds.forEach((id) => contentIds.add(id));
+  });
+  return {
+    published_video_count: contentIds.size,
+    published_influencer_count: publishedInfluencerCount,
+    content_id_list: [...contentIds],
+  };
+}
+
+function getPublishedContentIdsAfterSampleForAssignee(assignee, dateFrom, dateTo, filters = {}) {
+  const metaMap = buildInfluencerMetaMapForStats();
+  const sampledInfluencers = new Map();
+  queryRows(
+    `SELECT buyer_username, created_time_ymd, created_time_raw
+     FROM sample_orders
+     WHERE TRIM(COALESCE(buyer_username, '')) != ''`
+  ).forEach((order) => {
+    const ymd = order.created_time_ymd || parseCreatedTimeToYmd(order.created_time_raw);
+    if (!ymdInRangeForStats(ymd, dateFrom, dateTo)) return;
+    const meta = getInfluencerMetaForStats(metaMap, order.buyer_username, order.buyer_username);
+    if (isAllocationTaggedInfluencerForStats(meta.tags, filters)) return;
+    const assignees = getSampleStatsAssigneeTargets(meta, { scope_assignee: filters.scope_assignee });
+    if (!assignees.includes(assignee)) return;
+    const influencerKey = normalizeMatchKey(order.buyer_username);
+    if (!sampledInfluencers.has(influencerKey)) sampledInfluencers.set(influencerKey, new Set());
+    sampledInfluencers.get(influencerKey).add(ymd);
+  });
+  const videoIndex = buildInfluencerVideosIndexByCreatorKey();
+  return computePublishedVideoStatsAfterSample(sampledInfluencers, videoIndex).content_id_list;
 }
 
 function mergePublishedVideoCount(videoMap, keys) {
@@ -2983,6 +3072,21 @@ function isYesValue(value) {
   return text === '是' || text.toLowerCase() === 'yes' || text.toUpperCase() === 'Y';
 }
 
+function shiftBeijingYmd(dayOffset) {
+  const parts = getBeijingDateParts();
+  const date = new Date(`${parts.yearStr}-${parts.monthStr}-${parts.dayStr}T12:00:00+08:00`);
+  date.setDate(date.getDate() + dayOffset);
+  const next = getBeijingDateParts(date);
+  return `${next.yearStr}${next.monthStr}${next.dayStr}`;
+}
+
+function defaultSampleStatsDateRange() {
+  return {
+    start: shiftBeijingYmd(-45),
+    end: shiftBeijingYmd(-15),
+  };
+}
+
 function defaultDateFrom30Days() {
   const parts = getBeijingDateParts();
   const date = new Date(`${parts.yearStr}-${parts.monthStr}-${parts.dayStr}T12:00:00+08:00`);
@@ -3401,49 +3505,21 @@ function ymdToDateTimeBounds(fromYmd, toYmd) {
 }
 
 function resolveSampleStatsDateRange(filters = {}) {
-  const preset = String(filters.date_preset || 'recent_30d').trim();
-  const todayParts = getBeijingDateParts();
-  const todayYmd = `${todayParts.yearStr}${todayParts.monthStr}${todayParts.dayStr}`;
-
-  if (preset === 'last_month') {
-    const ranges = getCollaboratedMonthRangesBeijing();
-    return {
-      start: ranges.last_month.start,
-      end: ranges.last_month.end,
-      label: ranges.last_month.label,
-      preset,
-    };
+  let start = String(filters.date_from || '').trim();
+  let end = String(filters.date_to || '').trim();
+  if (!start || !end) {
+    const defaults = defaultSampleStatsDateRange();
+    start = defaults.start;
+    end = defaults.end;
   }
-
-  if (preset === 'year') {
-    return {
-      start: `${todayParts.yearStr}0101`,
-      end: todayYmd,
-      label: `${todayParts.year}年（截至${todayParts.month}月${todayParts.day}日）`,
-      preset,
-    };
+  if (!isValidYmd(start) || !isValidYmd(end)) {
+    throw new Error('时间格式无效，请使用 YYYYMMDD');
   }
-
-  if (preset === 'custom') {
-    const start = String(filters.date_from || '').trim();
-    const end = String(filters.date_to || '').trim();
-    if (!isValidYmd(start) || !isValidYmd(end)) {
-      throw new Error('自定义时间格式无效，请使用 YYYYMMDD');
-    }
-    if (start > end) throw new Error('开始日期不能晚于结束日期');
-    return {
-      start,
-      end,
-      label: `${start} - ${end}`,
-      preset,
-    };
-  }
-
+  if (start > end) throw new Error('开始日期不能晚于结束日期');
   return {
-    start: defaultDateFrom30Days(),
-    end: todayYmd,
-    label: '最近30天',
-    preset: 'recent_30d',
+    start,
+    end,
+    label: `${start} - ${end}`,
   };
 }
 
@@ -3541,6 +3617,7 @@ function createEmptySampleShipmentStatsRow() {
     approval_rate: null,
     sample_count: 0,
     published_video_count: 0,
+    published_influencer_count: 0,
     ordered_influencer_count: 0,
     video_count: 0,
     order_count: 0,
@@ -3550,11 +3627,11 @@ function createEmptySampleShipmentStatsRow() {
   };
 }
 
-function calcVideoRecoveryRatePercent(publishedVideoCount, sampleCount) {
-  const published = Number(publishedVideoCount) || 0;
+function calcVideoRecoveryRatePercent(publishedInfluencerCount, sampleCount) {
+  const publishedInfluencers = Number(publishedInfluencerCount) || 0;
   const samples = Number(sampleCount) || 0;
   if (samples <= 0) return null;
-  return (published / samples) * 100;
+  return (publishedInfluencers / samples) * 100;
 }
 
 function finalizeSampleShipmentStatsRow(row) {
@@ -3563,7 +3640,7 @@ function finalizeSampleShipmentStatsRow(row) {
     row.audit_rejected,
     row.audit_tentative
   );
-  row.video_recovery_rate = calcVideoRecoveryRatePercent(row.published_video_count, row.sample_count);
+  row.video_recovery_rate = calcVideoRecoveryRatePercent(row.published_influencer_count, row.sample_count);
   row.order_rate = calcOrderRatePercent(row.ordered_influencer_count, row.sample_count);
   row.avg_order_count = calcAvgOrderCount(row.order_count, row.sample_count);
   return row;
@@ -3577,6 +3654,7 @@ function sumSampleShipmentStatsRows(rows = []) {
     totals.audit_tentative += row.audit_tentative;
     totals.sample_count += row.sample_count;
     totals.published_video_count += row.published_video_count;
+    totals.published_influencer_count += row.published_influencer_count;
     totals.ordered_influencer_count += row.ordered_influencer_count;
     totals.video_count += row.video_count;
     totals.order_count += row.order_count;
@@ -3693,7 +3771,7 @@ function getSampleShipmentStats(filters = {}) {
   });
 
   rebuildAllianceOrderDerivedFields();
-  const videoMap = buildInfluencerVideoStatsByCreatorKey();
+  const videoIndex = buildInfluencerVideosIndexByCreatorKey();
   queryRows(
     `
     SELECT creator_username, content_id, is_refund, payment_time_ymd
@@ -3748,13 +3826,9 @@ function getSampleShipmentStats(filters = {}) {
     if (!bucket) return finalizeSampleShipmentStatsRow({ assignee, ...createEmptySampleShipmentStatsRow() });
 
     let orderedInfluencerCount = 0;
-    let publishedVideoCount = 0;
     let videoCount = 0;
     let orderCount = 0;
-    bucket.sampledInfluencers.forEach((_sampleDates, influencerKey) => {
-      const videoAgg = videoMap.get(influencerKey);
-      if (videoAgg?.videos?.size) publishedVideoCount += videoAgg.videos.size;
-    });
+    const publishedStats = computePublishedVideoStatsAfterSample(bucket.sampledInfluencers, videoIndex);
     bucket.allianceByInfluencer.forEach((agg) => {
       if (agg.orderCount > 0) {
         orderedInfluencerCount += 1;
@@ -3769,7 +3843,8 @@ function getSampleShipmentStats(filters = {}) {
       audit_rejected: bucket.audit.N,
       audit_tentative: bucket.audit.X,
       sample_count: bucket.sample_count,
-      published_video_count: publishedVideoCount,
+      published_video_count: publishedStats.published_video_count,
+      published_influencer_count: publishedStats.published_influencer_count,
       ordered_influencer_count: orderedInfluencerCount,
       video_count: videoCount,
       order_count: orderCount,
@@ -3927,26 +4002,46 @@ function buildInfluencerVideoWhere(filters = {}) {
     params.push(filters.import_time);
   }
   if (filters.assignee_filter && filters.sample_date_from && filters.sample_date_to) {
-    const creators = getSampledCreatorUsernamesForAssigneeInRange(
-      filters.assignee_filter,
-      filters.sample_date_from,
-      filters.sample_date_to
-    );
-    if (!creators.length) {
-      conditions.push('1 = 0');
-    } else {
-      const allNames = new Set();
-      creators.forEach((name) => {
-        allNames.add(String(name).trim());
-        getInfluencerAliasDisplayValues(name).forEach((value) => allNames.add(String(value).trim()));
-      });
-      const nameList = [...allNames].filter(Boolean);
-      if (!nameList.length) {
+    const publishAfterSample =
+      filters.publish_after_sample === '1' ||
+      filters.publish_after_sample === 1 ||
+      filters.publish_after_sample === true;
+    if (publishAfterSample) {
+      const contentIds = getPublishedContentIdsAfterSampleForAssignee(
+        filters.assignee_filter,
+        filters.sample_date_from,
+        filters.sample_date_to,
+        filters
+      );
+      if (!contentIds.length) {
         conditions.push('1 = 0');
       } else {
-        const placeholders = nameList.map(() => '?').join(', ');
-        conditions.push(`creator_username IN (${placeholders})`);
-        params.push(...nameList);
+        const placeholders = contentIds.map(() => '?').join(', ');
+        conditions.push(`content_id IN (${placeholders})`);
+        params.push(...contentIds);
+      }
+    } else {
+      const creators = getSampledCreatorUsernamesForAssigneeInRange(
+        filters.assignee_filter,
+        filters.sample_date_from,
+        filters.sample_date_to
+      );
+      if (!creators.length) {
+        conditions.push('1 = 0');
+      } else {
+        const allNames = new Set();
+        creators.forEach((name) => {
+          allNames.add(String(name).trim());
+          getInfluencerAliasDisplayValues(name).forEach((value) => allNames.add(String(value).trim()));
+        });
+        const nameList = [...allNames].filter(Boolean);
+        if (!nameList.length) {
+          conditions.push('1 = 0');
+        } else {
+          const placeholders = nameList.map(() => '?').join(', ');
+          conditions.push(`creator_username IN (${placeholders})`);
+          params.push(...nameList);
+        }
       }
     }
   }
@@ -3967,16 +4062,32 @@ function getInfluencerVideos(filters = {}) {
      ORDER BY id DESC
      LIMIT ? OFFSET ?`,
     [...params, pageSize, offset]
-  ).map((row) => {
+  );
+  rebuildAllianceOrderDerivedFields();
+  const allianceByContentId = buildAllianceOrderStatsByContentId();
+  const enrichedRows = rows.map((row) => {
     let data = {};
     try {
       data = JSON.parse(row.data_json || '{}');
     } catch {
       data = {};
     }
-    return { ...row, data };
+    const contentId = String(row.content_id || '').trim();
+    const stats = allianceByContentId.get(contentId) || { order_count: 0, refund_count: 0 };
+    return {
+      ...row,
+      data,
+      order_count: stats.order_count,
+      refund_count: stats.refund_count,
+    };
   });
-  return Promise.resolve({ rows, total, page, pageSize, columns: INFLUENCER_VIDEO_COLUMNS });
+  return Promise.resolve({
+    rows: enrichedRows,
+    total,
+    page,
+    pageSize,
+    columns: INFLUENCER_VIDEO_DISPLAY_COLUMNS,
+  });
 }
 
 function getInfluencerVideoImportTimeOptions(filters = {}) {
