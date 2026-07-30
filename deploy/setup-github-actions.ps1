@@ -26,12 +26,8 @@ if (-not (Test-Path $keyPath)) {
 
 $publicKey = (Get-Content $pubPath -Raw).Trim()
 Write-Host '==> Registering public key on server ...'
-$remoteCmd = @"
-mkdir -p ~/.ssh && chmod 700 ~/.ssh
-grep -qxF '$publicKey' ~/.ssh/authorized_keys 2>/dev/null || echo '$publicKey' >> ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-echo registered
-"@
+$escapedKey = $publicKey.Replace("'", "'\\''")
+$remoteCmd = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qxF '$escapedKey' ~/.ssh/authorized_keys 2>/dev/null || echo '$escapedKey' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && echo registered"
 ssh $SshHost $remoteCmd
 
 Write-Host ''
