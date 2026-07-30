@@ -4125,7 +4125,6 @@ function hasRealCollaboration(row) {
 }
 
 function buildCollaboratedRows(filters = {}) {
-  rebuildAllianceOrderDerivedFields();
   const conditions = [
     `TRIM(COALESCE(creator_username, '')) != ''`,
     `TRIM(COALESCE(payment_time_ymd, '')) != ''`,
@@ -4357,7 +4356,6 @@ function aggregateAllianceOrderStatsAllTime(creatorNames) {
   if (!creatorNames.length) {
     return { video_count: 0, order_count: 0, refund_count: 0 };
   }
-  rebuildAllianceOrderDerivedFields();
   const placeholders = creatorNames.map(() => '?').join(', ');
   const row = queryOne(
     `
@@ -4382,7 +4380,6 @@ function aggregateAllianceOrderStats(creatorNames, dateFrom, dateTo) {
   if (!creatorNames.length) {
     return { video_count: 0, order_count: 0, refund_count: 0 };
   }
-  rebuildAllianceOrderDerivedFields();
   const placeholders = creatorNames.map(() => '?').join(', ');
   const row = queryOne(
     `
@@ -4469,6 +4466,16 @@ function sortCollaboratedRows(rows, filters = {}) {
   });
 }
 
+function computeCollaboratedTabCounts(rows = []) {
+  const list = Array.isArray(rows) ? rows : [];
+  return {
+    all: list.length,
+    recent_sample: list.filter((row) => matchesCollaboratedTab(row, 'recent_sample')).length,
+    ordered: list.filter((row) => matchesCollaboratedTab(row, 'ordered')).length,
+    no_order: list.filter((row) => matchesCollaboratedTab(row, 'no_order')).length,
+  };
+}
+
 function getCollaboratedInfluencerIdsByFilters(filters = {}) {
   const { rows } = buildCollaboratedRows(filters);
   return Promise.resolve(rows.map((row) => row.influencer_id));
@@ -4477,29 +4484,29 @@ function getCollaboratedInfluencerIdsByFilters(filters = {}) {
 function getCollaboratedTabCounts(filters = {}) {
   const baseFilters = { ...filters, collab_tab: 'all' };
   const { rows } = buildCollaboratedRows(baseFilters);
-  return Promise.resolve({
-    all: rows.length,
-    recent_sample: rows.filter((row) => matchesCollaboratedTab(row, 'recent_sample')).length,
-    ordered: rows.filter((row) => matchesCollaboratedTab(row, 'ordered')).length,
-    no_order: rows.filter((row) => matchesCollaboratedTab(row, 'no_order')).length,
-  });
+  return Promise.resolve(computeCollaboratedTabCounts(rows));
 }
 
 function getCollaboratedStats(filters = {}) {
-  const { rows: allRows } = buildCollaboratedRows(filters);
-  const rows = sortCollaboratedRows(allRows, filters);
+  const baseFilters = { ...filters, collab_tab: 'all' };
+  const { rows: allRows } = buildCollaboratedRows(baseFilters);
+  const tabCounts = computeCollaboratedTabCounts(allRows);
+
+  const tab = filters.collab_tab || 'all';
+  let rows = tab === 'all' ? allRows : allRows.filter((row) => matchesCollaboratedTab(row, tab));
+  rows = sortCollaboratedRows(rows, filters);
   const total = rows.length;
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
   const pageSize = Math.min(200, Math.max(1, parseInt(filters.pageSize, 10) || 50));
   const offset = (page - 1) * pageSize;
 
-  return getCollaboratedTabCounts(filters).then((tabCounts) => ({
+  return Promise.resolve({
     rows: rows.slice(offset, offset + pageSize),
     total,
     page,
     pageSize,
     tabCounts,
-  }));
+  });
 }
 
 function mergeCollaboratedImportRemark(remark, situation) {

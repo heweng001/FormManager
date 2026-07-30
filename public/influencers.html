@@ -196,8 +196,7 @@
       setupSelectAllMenu();
       setupFilterAutofillGuard('filterInfluencerId');
       applyFiltersFromUrl();
-      await loadFilterOptions();
-      loadRecords();
+      await Promise.all([loadFilterOptions(), loadRecords()]);
     }
 
     function applyFiltersFromUrl() {
