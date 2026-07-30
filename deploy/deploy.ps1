@@ -1,4 +1,4 @@
-# Commit (if needed), push, and deploy to production.
+# Commit (if needed), push, sync code to server, and restart app.
 # Usage (PowerShell, from project root):
 #   powershell -ExecutionPolicy Bypass -File .\deploy\deploy.ps1 "fix tag filter"
 #   powershell -ExecutionPolicy Bypass -File .\deploy\deploy.ps1 -DeployOnly
@@ -43,6 +43,14 @@ if (-not $DeployOnly) {
   Invoke-GitPush
 }
 
-Write-Host "==> Deploying to $SshHost ..."
-ssh $SshHost 'cd /opt/form-manager && bash deploy/deploy-update.sh'
+Write-Host "==> Sync files to $SshHost via git archive ..."
+$archive = Join-Path $env:TEMP "form-manager-deploy-$([Guid]::NewGuid().ToString('N')).tar"
+try {
+  git archive -o $archive HEAD
+  scp $archive "${SshHost}:/tmp/form-manager-deploy.tar"
+  ssh $SshHost 'mkdir -p /opt/form-manager && cd /opt/form-manager && tar xf /tmp/form-manager-deploy.tar && rm -f /tmp/form-manager-deploy.tar && bash deploy/deploy-remote-install.sh'
+} finally {
+  if (Test-Path $archive) { Remove-Item $archive -Force }
+}
+
 Write-Host '==> Done'

@@ -14,7 +14,19 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
+      - uses: actions/checkout@v4
+
+      - name: Sync code to server
+        uses: burnett01/rsync-deployments@7.0.1
+        with:
+          switches: -avzr --delete --exclude=node_modules --exclude=.git --exclude=.github --exclude=data.db --exclude=.env --exclude=uploads --exclude=backups --exclude=migrate-bundle.zip
+          path: ./
+          remote_path: /opt/form-manager/
+          remote_host: ${{ secrets.DEPLOY_HOST }}
+          remote_user: ${{ secrets.DEPLOY_USER }}
+          remote_key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Install and restart
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -23,4 +35,4 @@ jobs:
           command_timeout: 10m
           script: |
             cd /opt/form-manager
-            bash deploy/deploy-update.sh
+            bash deploy/deploy-remote-install.sh
