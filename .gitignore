@@ -5,3 +5,5 @@ backups/
 .env
 *.log
 migrate-bundle.zip
+deploy/.github-actions-deploy
+deploy/.github-actions-deploy.pub
