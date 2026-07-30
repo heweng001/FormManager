@@ -282,10 +282,15 @@
       btn.textContent = '导入中...';
       const formData = new FormData();
       formData.append('file', selectedFile);
+      let succeeded = false;
       try {
         const res = await fetch('/api/sample-orders/upload', { method: 'POST', body: formData, credentials: 'same-origin' });
-        const data = await res.json();
-        if (!res.ok) return alert(data.message || '导入失败');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          alert(data.message || '导入失败');
+          return;
+        }
+        succeeded = true;
         let msg = data.message || `新增 ${data.inserted} 条，跳过重复 ${data.skipped} 条`;
         if (data.duplicateKeys?.length) {
           const preview = data.duplicateKeys.slice(0, 8).join('、');
@@ -295,12 +300,15 @@
         document.getElementById('importMessage').textContent = msg;
         document.getElementById('importModal').classList.remove('hidden');
       } catch {
-        alert('导入失败');
+        alert('连接超时或中断，导入可能仍在后台处理。请等待片刻后刷新列表查看，勿重复上传同一文件。');
       } finally {
         btn.disabled = false;
         btn.textContent = '开始导入';
-        resetImportForm();
-        toggleImportPanel(false);
+        if (succeeded) {
+          resetImportForm();
+          toggleImportPanel(false);
+          loadOrders();
+        }
       }
     }
 

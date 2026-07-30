@@ -268,19 +268,27 @@
       btn.textContent = '导入中...';
       const formData = new FormData();
       formData.append('file', selectedFile);
+      let succeeded = false;
       try {
         const res = await fetch('/api/alliance-orders/upload', { method: 'POST', body: formData, credentials: 'same-origin' });
-        const data = await res.json();
-        if (!res.ok) return alert(data.message || '导入失败');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          alert(data.message || '导入失败');
+          return;
+        }
+        succeeded = true;
         document.getElementById('importMessage').textContent = data.message || `新增 ${data.inserted || 0} 条，覆盖 ${data.updated || 0} 条`;
         document.getElementById('importModal').classList.remove('hidden');
       } catch {
-        alert('导入失败');
+        alert('连接超时或中断，导入可能仍在后台处理。请等待片刻后刷新列表查看，勿重复上传同一文件。');
       } finally {
         btn.disabled = false;
         btn.textContent = '开始导入';
-        resetImportForm();
-        toggleImportPanel(false);
+        if (succeeded) {
+          resetImportForm();
+          toggleImportPanel(false);
+          loadOrders();
+        }
       }
     }
 

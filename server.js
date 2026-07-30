@@ -69,22 +69,16 @@ const {
   insertArticle,
   updateArticle,
   deleteArticle,
-  setLastSampleOrderImport,
   getLastSampleOrderImport,
-  findSampleOrderByUniqueKey,
-  insertSampleOrder,
   getSampleOrderById,
   getSampleOrderPageNumber,
   getSampleOrders,
   getSampleOrderImportTimeOptions,
   getSampleOrderIdsByFilters,
   batchDeleteSampleOrders,
-  syncSampleDatesToRecords,
-  setLastAllianceOrderImport,
   getLastAllianceOrderImport,
-  findAllianceOrderByUniqueKey,
-  insertAllianceOrder,
-  updateAllianceOrder,
+  importAllianceOrdersBatch,
+  importSampleOrdersBatch,
   getAllianceOrderById,
   getAllianceOrderPageNumber,
   getAllianceOrders,
@@ -109,7 +103,6 @@ const {
   updateInfluencerProfileEmail,
   FULFILLMENT_PROGRESS_OPTIONS,
   formatBeijingDateTime,
-  rebuildAllianceOrderDerivedFields,
   getStaffMailSettingsPublic,
   getStaffMailSettingsForSend,
   updateStaffMailSettings,
@@ -1654,8 +1647,6 @@ app.post('/api/records/batch-email', requireAuth, async (req, res) => {
 app.post('/api/alliance-orders/upload', requireAuth, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: '请上传文件' });
   const filePath = req.file.path;
-  let inserted = 0;
-  let updated = 0;
   try {
     const { rows } = parseAllianceOrderFile(filePath);
     if (!rows.length) {
@@ -1665,37 +1656,10 @@ app.post('/api/alliance-orders/upload', requireAuth, upload.single('file'), asyn
       });
     }
 
-    const batchImportTime = formatBeijingDateTime(new Date());
-    for (const row of rows) {
-      const existing = await findAllianceOrderByUniqueKey(row.unique_key);
-      if (existing) {
-        await updateAllianceOrder(existing.id, {
-          unique_key: row.unique_key,
-          data: row.data,
-          imported_by: req.user.name,
-          import_time: batchImportTime,
-        });
-        updated++;
-        continue;
-      }
-      await insertAllianceOrder({
-        unique_key: row.unique_key,
-        data: row.data,
-        imported_by: req.user.name,
-        import_time: batchImportTime,
-      });
-      inserted++;
-    }
-
-    await rebuildAllianceOrderDerivedFields();
-
-    setLastAllianceOrderImport({
-      import_time: batchImportTime,
+    const { inserted, updated } = await importAllianceOrdersBatch({
+      rows,
       imported_by: req.user.name,
-      total: rows.length,
-      inserted,
-      updated,
-      skipped: 0,
+      import_time: formatBeijingDateTime(new Date()),
     });
 
     res.json({
@@ -1834,32 +1798,14 @@ app.post('/api/sample-orders/upload', requireAuth, upload.single('file'), async 
       });
     }
 
-    const batchImportTime = formatBeijingDateTime(new Date());
-    for (const row of rows) {
-      const existing = await findSampleOrderByUniqueKey(row.unique_key);
-      if (existing) {
-        skipped++;
-        duplicateKeys.push(row.unique_key);
-        continue;
-      }
-      await insertSampleOrder({
-        unique_key: row.unique_key,
-        data: row.data,
-        imported_by: req.user.name,
-        import_time: batchImportTime,
-      });
-      inserted++;
-    }
-
-    await syncSampleDatesToRecords();
-
-    setLastSampleOrderImport({
-      import_time: batchImportTime,
+    const batchResult = await importSampleOrdersBatch({
+      rows,
       imported_by: req.user.name,
-      total: rows.length,
-      inserted,
-      skipped,
+      import_time: formatBeijingDateTime(new Date()),
     });
+    inserted = batchResult.inserted;
+    skipped = batchResult.skipped;
+    duplicateKeys.push(...batchResult.duplicateKeys);
 
     res.json({
       success: true,

@@ -2431,12 +2431,12 @@ function getSampleOrderHeaders() {
   }
 }
 
-function setLastSampleOrderImport(summary) {
+function setLastSampleOrderImport(summary, options = {}) {
   db.run('INSERT OR REPLACE INTO sample_order_meta (key, value) VALUES (?, ?)', [
     'last_import',
     JSON.stringify(summary || {}),
   ]);
-  saveDb();
+  if (!options.deferSave) saveDb();
 }
 
 function getLastSampleOrderImport() {
@@ -2453,7 +2453,7 @@ function findSampleOrderByUniqueKey(uniqueKey) {
   return Promise.resolve(queryOne('SELECT id FROM sample_orders WHERE unique_key = ?', [uniqueKey]));
 }
 
-function insertSampleOrder({ unique_key, data, imported_by, import_time }) {
+function insertSampleOrder({ unique_key, data, imported_by, import_time }, options = {}) {
   const fields = extractSampleOrderFields(data);
   const resolvedImportTime = import_time || formatBeijingDateTime();
   db.run(
@@ -2472,8 +2472,8 @@ function insertSampleOrder({ unique_key, data, imported_by, import_time }) {
       resolvedImportTime,
     ]
   );
-  saveDb();
-  return Promise.resolve(db.exec('SELECT last_insert_rowid()')[0].values[0][0]);
+  if (!options.deferSave) saveDb();
+  return Promise.resolve(getLastInsertRowId());
 }
 
 function getSampleOrderById(id) {
@@ -2726,7 +2726,7 @@ function removeTagIfPresent(tagsValue, tagName) {
   return joinTagsList(splitTagsValue(tagsValue).filter((tag) => tag !== tagName));
 }
 
-function syncSampleDatesToRecords() {
+function syncSampleDatesToRecords(options = {}) {
   const ordersMissingYmd = queryRows(
     `SELECT id, created_time_raw FROM sample_orders
      WHERE TRIM(COALESCE(created_time_ymd, '')) = '' AND TRIM(COALESCE(created_time_raw, '')) != ''`
@@ -2777,8 +2777,48 @@ function syncSampleDatesToRecords() {
     ]);
   });
 
-  saveDb();
+  if (!options.deferSave) saveDb();
   return Promise.resolve(true);
+}
+
+function importSampleOrdersBatch({ rows, imported_by, import_time }) {
+  let inserted = 0;
+  let skipped = 0;
+  const duplicateKeys = [];
+  const batchImportTime = import_time || formatBeijingDateTime();
+
+  for (const row of rows) {
+    const existing = queryOne('SELECT id FROM sample_orders WHERE unique_key = ?', [row.unique_key]);
+    if (existing) {
+      skipped++;
+      duplicateKeys.push(row.unique_key);
+      continue;
+    }
+    insertSampleOrder(
+      {
+        unique_key: row.unique_key,
+        data: row.data,
+        imported_by,
+        import_time: batchImportTime,
+      },
+      { deferSave: true }
+    );
+    inserted++;
+  }
+
+  syncSampleDatesToRecords({ deferSave: true });
+  setLastSampleOrderImport(
+    {
+      import_time: batchImportTime,
+      imported_by,
+      total: rows.length,
+      inserted,
+      skipped,
+    },
+    { deferSave: true }
+  );
+  saveDb();
+  return Promise.resolve({ inserted, skipped, duplicateKeys, import_time: batchImportTime });
 }
 
 function isYesValue(value) {
@@ -2875,12 +2915,12 @@ function getAllianceOrderHeaders() {
   }
 }
 
-function setLastAllianceOrderImport(summary) {
+function setLastAllianceOrderImport(summary, options = {}) {
   db.run('INSERT OR REPLACE INTO alliance_order_meta (key, value) VALUES (?, ?)', [
     'last_import',
     JSON.stringify(summary || {}),
   ]);
-  saveDb();
+  if (!options.deferSave) saveDb();
 }
 
 function getLastAllianceOrderImport() {
@@ -2901,7 +2941,7 @@ function findAllianceOrderByUniqueKey(uniqueKey) {
   );
 }
 
-function insertAllianceOrder({ unique_key, data, imported_by, import_time }) {
+function insertAllianceOrder({ unique_key, data, imported_by, import_time }, options = {}) {
   const fields = extractAllianceOrderFields(data);
   const resolvedUniqueKey = unique_key || fields.order_id;
   const resolvedImportTime = import_time || formatBeijingDateTime();
@@ -2925,11 +2965,11 @@ function insertAllianceOrder({ unique_key, data, imported_by, import_time }) {
       resolvedImportTime,
     ]
   );
-  saveDb();
-  return Promise.resolve(db.exec('SELECT last_insert_rowid()')[0].values[0][0]);
+  if (!options.deferSave) saveDb();
+  return Promise.resolve(getLastInsertRowId());
 }
 
-function updateAllianceOrder(id, { unique_key, data, imported_by, import_time }) {
+function updateAllianceOrder(id, { unique_key, data, imported_by, import_time }, options = {}) {
   const fields = extractAllianceOrderFields(data);
   const resolvedUniqueKey = unique_key || fields.order_id;
   const resolvedImportTime = import_time || formatBeijingDateTime();
@@ -2955,8 +2995,59 @@ function updateAllianceOrder(id, { unique_key, data, imported_by, import_time })
       id,
     ]
   );
-  saveDb();
+  if (!options.deferSave) saveDb();
   return Promise.resolve(true);
+}
+
+function importAllianceOrdersBatch({ rows, imported_by, import_time }) {
+  let inserted = 0;
+  let updated = 0;
+  const batchImportTime = import_time || formatBeijingDateTime();
+
+  for (const row of rows) {
+    const key = String(row.unique_key || '').trim();
+    const existing = key
+      ? queryOne('SELECT id FROM alliance_orders WHERE unique_key = ? OR order_id = ? LIMIT 1', [key, key])
+      : null;
+    if (existing) {
+      updateAllianceOrder(
+        existing.id,
+        {
+          unique_key: row.unique_key,
+          data: row.data,
+          imported_by,
+          import_time: batchImportTime,
+        },
+        { deferSave: true }
+      );
+      updated++;
+      continue;
+    }
+    insertAllianceOrder(
+      {
+        unique_key: row.unique_key,
+        data: row.data,
+        imported_by,
+        import_time: batchImportTime,
+      },
+      { deferSave: true }
+    );
+    inserted++;
+  }
+
+  setLastAllianceOrderImport(
+    {
+      import_time: batchImportTime,
+      imported_by,
+      total: rows.length,
+      inserted,
+      updated,
+      skipped: 0,
+    },
+    { deferSave: true }
+  );
+  saveDb();
+  return Promise.resolve({ inserted, updated, import_time: batchImportTime });
 }
 
 function backfillAllianceOrderDates() {
@@ -5439,6 +5530,8 @@ module.exports = {
   findAllianceOrderByUniqueKey,
   insertAllianceOrder,
   updateAllianceOrder,
+  importAllianceOrdersBatch,
+  importSampleOrdersBatch,
   getAllianceOrderById,
   getAllianceOrderPageNumber,
   getAllianceOrders,
