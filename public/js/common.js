@@ -296,28 +296,24 @@ function formatImportTimeValue(value) {
 
 const ORDER_IMPORT_TIME_HEADER = '__import_time__';
 
-function normalizeOrderHeaderKey(header) {
-  return String(header || '').trim().toLowerCase().replace(/\s+/g, '');
+function isOrderIdColumn(column) {
+  return column?.key === 'order_id';
 }
 
-function isOrderIdTableHeader(header) {
-  const key = normalizeOrderHeaderKey(header);
-  return key === 'orderid' || key === '订单id';
+function isSkuIdColumn(column) {
+  return column?.key === 'sku_id';
 }
 
-function isSkuIdTableHeader(header) {
-  const key = normalizeOrderHeaderKey(header);
-  return key === 'skuid' || key === 'sku';
-}
-
-function getSkuIdFromOrderRow(row, header) {
+function getSkuIdFromOrderRow(row, column) {
   if (row?.sku_id) return String(row.sku_id).trim();
-  if (isSkuIdTableHeader(header)) return String(row.data?.[header] || '').trim();
+  if (isSkuIdColumn(column) && typeof readOrderCellValue === 'function') {
+    return readOrderCellValue(row, column);
+  }
   return '';
 }
 
-function resolveSkuModelDisplay(raw, row, header, skuModelMap = {}) {
-  const skuId = getSkuIdFromOrderRow(row, header) || String(raw || '').trim();
+function resolveSkuModelDisplay(raw, row, column, skuModelMap = {}) {
+  const skuId = getSkuIdFromOrderRow(row, column) || String(raw || '').trim();
   if (!skuId) return null;
   const model = skuModelMap[skuId];
   if (!model) return null;
@@ -340,15 +336,15 @@ function buildModelSkuTitle(model, skuId, shopName) {
   return '';
 }
 
-function findOrderIdHeaderIndex(headers = []) {
-  return headers.findIndex((header) => isOrderIdTableHeader(header));
+function findOrderIdColumnIndex(columns = []) {
+  return columns.findIndex((column) => isOrderIdColumn(column));
 }
 
-function buildOrderDisplayHeaders(headers = []) {
-  const list = [...headers];
-  const orderIdx = findOrderIdHeaderIndex(list);
+function buildOrderDisplayColumns(columns = []) {
+  const list = columns.map((column) => ({ ...column }));
+  const orderIdx = findOrderIdColumnIndex(list);
   const insertAt = orderIdx >= 0 ? orderIdx : 0;
-  list.splice(insertAt, 0, ORDER_IMPORT_TIME_HEADER);
+  list.splice(insertAt, 0, { key: ORDER_IMPORT_TIME_HEADER, label: '导入时间' });
   return list;
 }
 
@@ -356,22 +352,22 @@ function renderOrderImportTimeHeader() {
   return `<th class="cell-import-time">导入时间</th>`;
 }
 
-function renderOrderTableHeadHtml(headers = []) {
-  return buildOrderDisplayHeaders(headers)
-    .map((header) => {
-      if (header === ORDER_IMPORT_TIME_HEADER) return renderOrderImportTimeHeader();
-      return `<th>${escapeHtml(normalizeInfluencerIdHeaderLabel(header))}</th>`;
+function renderOrderTableHeadHtml(columns = []) {
+  return buildOrderDisplayColumns(columns)
+    .map((column) => {
+      if (column.key === ORDER_IMPORT_TIME_HEADER) return renderOrderImportTimeHeader();
+      return `<th>${escapeHtml(column.label || column.key)}</th>`;
     })
     .join('');
 }
 
-function renderOrderTableCellHtml(row, header, skuModelMap = {}) {
-  if (header === ORDER_IMPORT_TIME_HEADER) {
+function renderOrderTableCellHtml(row, column, skuModelMap = {}) {
+  if (column.key === ORDER_IMPORT_TIME_HEADER) {
     const text = formatImportTimeValue(row.import_time) || '-';
     return `<td class="cell-import-time" title="${escapeAttr(text)}">${escapeHtml(text)}</td>`;
   }
-  const raw = row.data?.[header] || '';
-  const skuDisplay = isSkuIdTableHeader(header) ? resolveSkuModelDisplay(raw, row, header, skuModelMap) : null;
+  const raw = typeof readOrderCellValue === 'function' ? readOrderCellValue(row, column) : '';
+  const skuDisplay = isSkuIdColumn(column) ? resolveSkuModelDisplay(raw, row, column, skuModelMap) : null;
   if (skuDisplay) {
     const title = `${skuDisplay.model}（SKU ${skuDisplay.skuId}）`;
     return `<td class="cell-truncate cell-sku-model" title="${escapeAttr(title)}">${escapeHtml(skuDisplay.model)}</td>`;
@@ -1055,32 +1051,50 @@ function createBatchRowSelection() {
     closeSelectAllMenu();
   }
 
-  function setupSelectAllMenu() {
+  function bindSelectAllMenuElements() {
     const checkbox = document.getElementById('selectAllCheckbox');
     const wrap = document.getElementById('selectAllWrap');
-    if (!checkbox || !wrap || wrap.dataset.bound === '1') return;
-    wrap.dataset.bound = '1';
+    if (!checkbox || !wrap) return;
 
-    checkbox.addEventListener('mousedown', (e) => e.preventDefault());
-    checkbox.addEventListener('click', (e) => {
+    checkbox.onmousedown = (e) => e.preventDefault();
+    checkbox.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
       toggleSelectAllMenu();
-    });
-    document.getElementById('selectPageBtn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      selectCurrentPage();
-    });
-    document.getElementById('selectAllBtn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      selectAllResults();
-    });
-    document.getElementById('selectClearBtn')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      clearSelection();
-    });
+    };
+    const pageBtn = document.getElementById('selectPageBtn');
+    if (pageBtn) {
+      pageBtn.onclick = (e) => {
+        e.stopPropagation();
+        selectCurrentPage();
+      };
+    }
+    const allBtn = document.getElementById('selectAllBtn');
+    if (allBtn) {
+      allBtn.onclick = (e) => {
+        e.stopPropagation();
+        selectAllResults();
+      };
+    }
+    const clearBtn = document.getElementById('selectClearBtn');
+    if (clearBtn) {
+      clearBtn.onclick = (e) => {
+        e.stopPropagation();
+        clearSelection();
+      };
+    }
+    syncHeaderCheckbox();
+  }
+
+  let documentClickBound = false;
+
+  function setupSelectAllMenu() {
+    bindSelectAllMenuElements();
+    if (documentClickBound) return;
+    documentClickBound = true;
     document.addEventListener('click', (e) => {
-      if (!wrap.contains(e.target)) closeSelectAllMenu();
+      const wrap = document.getElementById('selectAllWrap');
+      if (wrap && !wrap.contains(e.target)) closeSelectAllMenu();
     });
   }
 

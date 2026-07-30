@@ -2088,7 +2088,13 @@ function updateRecordFields(id, fields, meta = {}) {
   });
 }
 
-const SAMPLE_ORDER_COLUMN_INDEXES = [0, 1, 2, 5, 28, 30, 31, 32, 38, 44];
+const {
+  SAMPLE_ORDER_COLUMN_INDEXES,
+  ALLIANCE_ORDER_COLUMN_INDEXES,
+  SAMPLE_ORDER_COLUMNS,
+  ALLIANCE_ORDER_COLUMNS,
+  readOrderFieldFromData,
+} = require('./public/js/order-columns.js');
 
 function migrateRemoveDuplicateSampleTag() {
   ensureAppMetaTable();
@@ -2391,10 +2397,14 @@ function parseCreatedTimeToYmd(value) {
 }
 
 function extractSampleOrderFields(data) {
-  const buyer_username = pickDataField(data, ['达人id', '达人ID', 'Buyer Username', 'buyer username', 'BuyerUsername']);
-  const sku_id = pickDataField(data, ['SKU ID', 'Sku ID', 'SKU ID ', 'skuid', 'SKU']);
-  const order_id = pickDataField(data, ['Order ID', 'order id', 'OrderID']);
-  const created_time_raw = pickDataField(data, ['Created Time', 'created time', 'CreatedTime', 'Creater Time', '寄样日期']);
+  const buyer_username = readOrderFieldFromData(data, 'buyer_username', [
+    '达人id', '达人ID', 'Buyer Username', 'buyer username', 'BuyerUsername',
+  ]);
+  const sku_id = readOrderFieldFromData(data, 'sku_id', ['SKU ID', 'Sku ID', 'SKU ID ', 'skuid', 'SKU']);
+  const order_id = readOrderFieldFromData(data, 'order_id', ['Order ID', 'order id', 'OrderID', '订单 ID', '订单id', '订单ID']);
+  const created_time_raw = readOrderFieldFromData(data, 'created_time_raw', [
+    'Created Time', 'created time', 'CreatedTime', 'Creater Time', '寄样日期',
+  ]);
   const created_time_ymd = parseCreatedTimeToYmd(created_time_raw);
   return { buyer_username, sku_id, order_id, created_time_raw, created_time_ymd };
 }
@@ -2505,7 +2515,7 @@ function getSampleOrders(filters = {}) {
     }
     return { ...row, data };
   });
-  return Promise.resolve({ rows, total, page, pageSize, headers: getSampleOrderHeaders() });
+  return Promise.resolve({ rows, total, page, pageSize, columns: SAMPLE_ORDER_COLUMNS });
 }
 
 function backfillSampleOrderYmdFromRaw() {
@@ -2768,8 +2778,6 @@ function syncSampleDatesToRecords() {
   return Promise.resolve(true);
 }
 
-const ALLIANCE_ORDER_COLUMN_INDEXES = [0, 1, 2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 15, 16, 17, 20, 21, 25, 26, 27, 28];
-
 function isYesValue(value) {
   const text = String(value || '').trim();
   return text === '是' || text.toLowerCase() === 'yes' || text.toUpperCase() === 'Y';
@@ -2825,14 +2833,16 @@ function normalizeYmdInput(value) {
 }
 
 function extractAllianceOrderFields(data) {
-  const content_id = pickDataField(data, ['内容ID', '内容id', 'Content ID', 'content id']);
-  const creator_username = pickDataField(data, ['达人id', '达人ID', '达人用户名', 'Creator Username', 'creator username']);
-  const order_id = pickDataField(data, ['订单 ID', '订单id', '订单ID', 'Order ID', 'order id']);
-  const payment_time_raw = pickDataField(data, ['支付时间', 'Payment Time', 'payment time']);
+  const content_id = readOrderFieldFromData(data, 'content_id', ['内容ID', '内容id', 'Content ID', 'content id']);
+  const creator_username = readOrderFieldFromData(data, 'creator_username', [
+    '达人id', '达人ID', '达人用户名', 'Creator Username', 'creator username',
+  ]);
+  const order_id = readOrderFieldFromData(data, 'order_id', ['订单 ID', '订单id', '订单ID', 'Order ID', 'order id']);
+  const payment_time_raw = readOrderFieldFromData(data, 'payment_time_raw', ['支付时间', 'Payment Time', 'payment time']);
   const payment_time_ymd = parseCreatedTimeToYmd(payment_time_raw);
-  const return_or_refund = pickDataField(data, ['已全部退货或全额退款', '已全部退货', '全额退款']);
+  const return_or_refund = readOrderFieldFromData(data, 'full_return', ['已全部退货或全额退款', '已全部退货', '全额退款']);
   const full_return = return_or_refund;
-  const full_refund = pickDataField(data, ['全额退款']);
+  const full_refund = readOrderFieldFromData(data, 'full_refund', ['全额退款', 'Full Refund', 'full refund']);
   const is_refund = isYesValue(return_or_refund) || isYesValue(full_refund) ? 1 : 0;
   return {
     content_id,
@@ -2995,7 +3005,7 @@ function getAllianceOrders(filters = {}) {
     }
     return { ...row, data };
   });
-  return Promise.resolve({ rows, total, page, pageSize, headers: getAllianceOrderHeaders() });
+  return Promise.resolve({ rows, total, page, pageSize, columns: ALLIANCE_ORDER_COLUMNS });
 }
 
 function buildAllianceOrderWhere(filters = {}) {
@@ -5386,6 +5396,8 @@ module.exports = {
   parseCreatedTimeToYmd,
   SAMPLE_ORDER_COLUMN_INDEXES,
   ALLIANCE_ORDER_COLUMN_INDEXES,
+  SAMPLE_ORDER_COLUMNS,
+  ALLIANCE_ORDER_COLUMNS,
   setAllianceOrderHeaders,
   getAllianceOrderHeaders,
   setLastAllianceOrderImport,

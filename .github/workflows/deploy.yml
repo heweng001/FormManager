@@ -35,4 +35,5 @@ jobs:
           command_timeout: 10m
           script: |
             cd /opt/form-manager
+            sed -i 's/\r$//' deploy/*.sh 2>/dev/null || true
             bash deploy/deploy-remote-install.sh

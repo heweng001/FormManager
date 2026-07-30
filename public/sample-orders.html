@@ -7,12 +7,13 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <script src="/js/order-columns.js"></script>
   <script src="/js/common.js"></script>
   <script>
     const PAGE_SIZE = 50;
     let currentPage = 1;
     let totalPages = 1;
-    let tableHeaders = [];
+    const tableColumns = SAMPLE_ORDER_COLUMNS;
     let skuModelMap = {};
     let selectedFile = null;
     let importPanelOpen = false;
@@ -56,7 +57,7 @@
               <div id="importPanel" class="erp-import-panel hidden">
                 <div id="dropZone" class="erp-upload-zone compact">
                   <p class="erp-upload-title">拖拽或点击上传 ${IMPORT_FILE_LABEL}</p>
-                  <p class="erp-upload-hint">首行作为表头；第 1 列为唯一标识，重复项仅提示并跳过</p>
+                  <p class="erp-upload-hint">第 1 行会被跳过，数据从第 2 行开始；第 1 列为唯一标识，重复项仅提示并跳过</p>
                   <input type="file" id="fileInput" accept="${IMPORT_FILE_ACCEPT}" style="display:none" />
                 </div>
                 <p id="fileName" class="erp-meta hidden-text"></p>
@@ -92,7 +93,6 @@
         `,
       });
       bindEvents();
-      rowSelection.setupSelectAllMenu();
       setupFilterAutofillGuard(['filterOrderId', 'filterBuyerUsername']);
       applyFiltersFromUrl();
       await resolveHighlightPage();
@@ -150,19 +150,16 @@
       return q ? `?${q}` : '';
     }
 
-    function renderTableHead(headers) {
+    function renderTableHead() {
       const thead = document.getElementById('sampleOrderHead');
-      if (!headers.length) {
-        thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}<th>暂无表头</th></tr>`;
-        return;
-      }
-      thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}${renderOrderTableHeadHtml(headers)}</tr>`;
+      thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}${renderOrderTableHeadHtml(tableColumns)}</tr>`;
+      rowSelection.setupSelectAllMenu();
     }
 
-    function renderTableBody(rows, headers) {
-      const displayHeaders = buildOrderDisplayHeaders(headers);
+    function renderTableBody(rows) {
+      const displayColumns = buildOrderDisplayColumns(tableColumns);
       const tbody = document.getElementById('sampleOrderBody');
-      const colSpan = Math.max(displayHeaders.length, 1) + 1;
+      const colSpan = Math.max(displayColumns.length, 1) + 1;
       if (!rows.length) {
         tbody.innerHTML = `<tr><td colspan="${colSpan}" class="erp-empty">暂无记录</td></tr>`;
         return;
@@ -170,7 +167,7 @@
       tbody.innerHTML = rows.map((row) => `
         <tr class="sample-order-row" data-id="${row.id}" id="sample-order-${row.id}">
           ${rowSelection.renderCheckboxCell(row.id)}
-          ${displayHeaders.map((header) => renderOrderTableCellHtml(row, header, skuModelMap)).join('')}
+          ${displayColumns.map((column) => renderOrderTableCellHtml(row, column, skuModelMap)).join('')}
         </tr>
       `).join('');
       rowSelection.bindRowCheckboxes();
@@ -199,14 +196,12 @@
 
     async function loadOrders() {
       const { res, data } = await api(`/api/sample-orders${buildQueryString(getFilters())}`);
-      const headers = data.headers || tableHeaders;
-      if (headers.length) tableHeaders = headers;
       skuModelMap = data.skuModelMap || {};
-      renderTableHead(tableHeaders);
+      renderTableHead();
       await loadImportTimeFilterOptions();
 
       const tbody = document.getElementById('sampleOrderBody');
-      const colSpan = Math.max(buildOrderDisplayHeaders(tableHeaders).length, 1) + 1;
+      const colSpan = Math.max(buildOrderDisplayColumns(tableColumns).length, 1) + 1;
       if (!res.ok) {
         tbody.innerHTML = `<tr><td colspan="${colSpan}" class="erp-empty">加载失败</td></tr>`;
         return;
@@ -217,7 +212,7 @@
       document.getElementById('prevPageBtn').disabled = data.page <= 1;
       document.getElementById('nextPageBtn').disabled = data.page >= totalPages;
       document.getElementById('lastImportBanner').innerHTML = renderLastImportSummary(data.lastImport);
-      renderTableBody(data.data || [], tableHeaders);
+      renderTableBody(data.data || []);
       rowSelection.setLoadedRows(data.data || [], data.total || 0);
       highlightTargetRows();
     }

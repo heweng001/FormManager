@@ -9,6 +9,13 @@ const path = require('path');
 const fs = require('fs');
 const XLSX = require('xlsx');
 const {
+  buildImportedOrderData,
+  SAMPLE_ORDER_COLUMN_INDEXES,
+  ALLIANCE_ORDER_COLUMN_INDEXES,
+  SAMPLE_ORDER_COLUMNS,
+  ALLIANCE_ORDER_COLUMNS,
+} = require('./public/js/order-columns.js');
+const {
   initDatabase,
   normalizeCommissionRate,
   sanitizeCommission,
@@ -61,8 +68,6 @@ const {
   insertArticle,
   updateArticle,
   deleteArticle,
-  setSampleOrderHeaders,
-  getSampleOrderHeaders,
   setLastSampleOrderImport,
   getLastSampleOrderImport,
   findSampleOrderByUniqueKey,
@@ -74,9 +79,6 @@ const {
   getSampleOrderIdsByFilters,
   batchDeleteSampleOrders,
   syncSampleDatesToRecords,
-  SAMPLE_ORDER_COLUMN_INDEXES,
-  ALLIANCE_ORDER_COLUMN_INDEXES,
-  setAllianceOrderHeaders,
   setLastAllianceOrderImport,
   getLastAllianceOrderImport,
   findAllianceOrderByUniqueKey,
@@ -382,52 +384,36 @@ function parseSampleOrderFile(filePath) {
   const workbook = XLSX.readFile(filePath);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
-  if (rows.length < 2) return { headers: [], rows: [] };
-  const headerRow = rows[0];
-  const headers = SAMPLE_ORDER_COLUMN_INDEXES.map((index) =>
-    String(headerRow[index] ?? `Column ${index + 1}`).trim()
-  );
-  const uniqueHeader = headers[0];
+  if (rows.length < 2) return { rows: [] };
   const parsedRows = rows
     .slice(1)
     .map((row) => {
-      const data = {};
-      SAMPLE_ORDER_COLUMN_INDEXES.forEach((colIndex, idx) => {
-        data[headers[idx]] = row[colIndex] ?? '';
-      });
+      const data = buildImportedOrderData(row, SAMPLE_ORDER_COLUMN_INDEXES, SAMPLE_ORDER_COLUMNS);
       return {
-        unique_key: toCellValue(data[uniqueHeader]),
+        unique_key: toCellValue(data.unique_key),
         data,
       };
     })
     .filter((item) => item.unique_key);
-  return { headers, rows: parsedRows };
+  return { rows: parsedRows };
 }
 
 function parseAllianceOrderFile(filePath) {
   const workbook = XLSX.readFile(filePath);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
-  if (rows.length < 2) return { headers: [], rows: [] };
-  const headerRow = rows[0];
-  const headers = ALLIANCE_ORDER_COLUMN_INDEXES.map((index) =>
-    String(headerRow[index] ?? `Column ${index + 1}`).trim()
-  );
-  const uniqueHeader = headers[0];
+  if (rows.length < 2) return { rows: [] };
   const parsedRows = rows
     .slice(1)
     .map((row) => {
-      const data = {};
-      ALLIANCE_ORDER_COLUMN_INDEXES.forEach((colIndex, idx) => {
-        data[headers[idx]] = row[colIndex] ?? '';
-      });
+      const data = buildImportedOrderData(row, ALLIANCE_ORDER_COLUMN_INDEXES, ALLIANCE_ORDER_COLUMNS);
       return {
-        unique_key: toCellValue(data[uniqueHeader]),
+        unique_key: toCellValue(data.unique_key),
         data,
       };
     })
     .filter((item) => item.unique_key);
-  return { headers, rows: parsedRows };
+  return { rows: parsedRows };
 }
 
 function buildRecordFilters(query, user) {
@@ -1689,14 +1675,13 @@ app.post('/api/alliance-orders/upload', requireAuth, upload.single('file'), asyn
   let skipped = 0;
   const duplicateKeys = [];
   try {
-    const { headers, rows } = parseAllianceOrderFile(filePath);
+    const { rows } = parseAllianceOrderFile(filePath);
     if (!rows.length) {
       return res.status(400).json({
         success: false,
         message: '未能从文件中解析到有效数据。请确认首列为唯一标识且数据从第 2 行开始。',
       });
     }
-    if (headers.length) setAllianceOrderHeaders(headers);
 
     const batchImportTime = formatBeijingDateTime(new Date());
     for (const row of rows) {
@@ -1763,11 +1748,11 @@ app.get('/api/alliance-orders', requireAuth, async (req, res) => {
     if (!isManager(req.user)) {
       filters.scope_assignee = req.user.name;
     }
-    const { rows, total, page, pageSize, headers } = await getAllianceOrders(filters);
+    const { rows, total, page, pageSize, columns } = await getAllianceOrders(filters);
     res.json({
       success: true,
       data: rows,
-      headers,
+      columns,
       skuModelMap: getSkuModelLookupMap(),
       total,
       page,
@@ -1853,14 +1838,13 @@ app.post('/api/sample-orders/upload', requireAuth, upload.single('file'), async 
   let skipped = 0;
   const duplicateKeys = [];
   try {
-    const { headers, rows } = parseSampleOrderFile(filePath);
+    const { rows } = parseSampleOrderFile(filePath);
     if (!rows.length) {
       return res.status(400).json({
         success: false,
         message: '未能从文件中解析到有效数据。请确认首列为唯一标识且数据从第 2 行开始。',
       });
     }
-    if (headers.length) setSampleOrderHeaders(headers);
 
     const batchImportTime = formatBeijingDateTime(new Date());
     for (const row of rows) {
@@ -1924,11 +1908,11 @@ app.get('/api/sample-orders', requireAuth, async (req, res) => {
     if (!isManager(req.user)) {
       filters.scope_assignee = req.user.name;
     }
-    const { rows, total, page, pageSize, headers } = await getSampleOrders(filters);
+    const { rows, total, page, pageSize, columns } = await getSampleOrders(filters);
     res.json({
       success: true,
       data: rows,
-      headers,
+      columns,
       skuModelMap: getSkuModelLookupMap(),
       total,
       page,

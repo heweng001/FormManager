@@ -48,7 +48,7 @@ $archive = Join-Path $env:TEMP "form-manager-deploy-$([Guid]::NewGuid().ToString
 try {
   git archive -o $archive HEAD
   scp $archive "${SshHost}:/tmp/form-manager-deploy.tar"
-  ssh $SshHost 'mkdir -p /opt/form-manager && cd /opt/form-manager && tar xf /tmp/form-manager-deploy.tar && rm -f /tmp/form-manager-deploy.tar && bash deploy/deploy-remote-install.sh'
+  ssh $SshHost 'mkdir -p /opt/form-manager && cd /opt/form-manager && tar xf /tmp/form-manager-deploy.tar && rm -f /tmp/form-manager-deploy.tar && sed -i "s/\r$//" deploy/*.sh && bash deploy/deploy-remote-install.sh'
 } finally {
   if (Test-Path $archive) { Remove-Item $archive -Force }
 }
