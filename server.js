@@ -9,11 +9,12 @@ const path = require('path');
 const fs = require('fs');
 const XLSX = require('xlsx');
 const {
-  buildImportedOrderData,
-  SAMPLE_ORDER_COLUMN_INDEXES,
-  ALLIANCE_ORDER_COLUMN_INDEXES,
+  buildSampleOrderImportData,
+  buildAllianceOrderImportData,
+  buildRecordImportData,
   SAMPLE_ORDER_COLUMNS,
   ALLIANCE_ORDER_COLUMNS,
+  RECORD_IMPORT_COLUMNS,
 } = require('./public/js/order-columns.js');
 const {
   initDatabase,
@@ -177,35 +178,7 @@ const wikiImageUpload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
 });
 
-const HEADER_ALIASES = {
-  influencer_id: ['达人id', '达人ID', 'influencerid', 'influencer_id'],
-  follower_count: ['粉丝数', 'followercount', 'follower_count'],
-  expected_publish_rate: ['预计发布率', 'expectedpublishrate', 'expected_publish_rate'],
-  transaction_amount: ['成交金额', 'transactionamount', 'transaction_amount'],
-  avg_video_views: ['平均视频播放量', 'avgvideoviews', 'avg_video_views'],
-  product_title: ['商品标题', 'producttitle', 'product_title'],
-  product_id: ['商品id', '商品ID', 'productid', 'product_id'],
-  sku_id: ['skuid', 'sku_id', 'skuID'],
-  commission: ['佣金率', '佣金', 'commission', 'commissionrate', 'commission_rate'],
-  application_id: ['申请id', '申请ID', 'applicationid', 'application_id'],
-  update_time: ['更新时间', 'updatetime', 'update_time'],
-  audit_status: ['审核', 'auditstatus', 'audit_status', 'audit'],
-  remark: ['备注', 'remark', 'remarks'],
-};
-
-const IMPORT_COLUMNS = [
-  'influencer_id',
-  'follower_count',
-  'expected_publish_rate',
-  'transaction_amount',
-  'avg_video_views',
-  'product_title',
-  'product_id',
-  'sku_id',
-  'commission',
-  'application_id',
-  'update_time',
-];
+const IMPORT_COLUMNS = RECORD_IMPORT_COLUMNS.map((column) => column.key);
 
 const EXPORT_HEADERS = [
   { key: 'influencer_id', label: '达人id' },
@@ -291,42 +264,87 @@ function toCellValue(value) {
   return String(value).trim();
 }
 
-function normalizeHeader(header) {
-  return String(header || '').trim().toLowerCase().replace(/\s+/g, '');
+function scoreSpreadsheetDataRows(rows) {
+  const sample = rows[1] || rows[0] || [];
+  return sample.filter((cell) => String(cell ?? '').trim() !== '').length;
 }
 
-function resolveFieldKey(header) {
-  const normalized = normalizeHeader(header);
-  for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
-    if (aliases.some((alias) => normalizeHeader(alias) === normalized)) return field;
+function readSpreadsheetRows(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext !== '.csv') {
+    const workbook = XLSX.readFile(filePath);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
   }
-  return null;
-}
 
-function mapRow(row, headers) {
-  const mapped = {};
-  headers.forEach((header, index) => {
-    const field = resolveFieldKey(header);
-    if (field) mapped[field] = row[index];
-  });
-  return mapped;
+  const buf = fs.readFileSync(filePath);
+  const attempts = [
+    () => XLSX.read(buf, { type: 'buffer', raw: false }),
+    () => {
+      const iconv = require('iconv-lite');
+      const text = iconv.decode(buf, 'gbk');
+      return XLSX.read(text, { type: 'string', raw: false });
+    },
+  ];
+
+  let bestRows = [];
+  let bestScore = -1;
+  for (const attempt of attempts) {
+    try {
+      const workbook = attempt();
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+      const score = scoreSpreadsheetDataRows(rows);
+      if (score > bestScore) {
+        bestScore = score;
+        bestRows = rows;
+      }
+    } catch {
+      // try next encoding
+    }
+  }
+
+  if (bestRows.length) return bestRows;
+  const workbook = XLSX.read(buf, { type: 'buffer', raw: false });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
 }
 
 function parseFile(filePath) {
-  const workbook = XLSX.readFile(filePath);
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+  const rows = readSpreadsheetRows(filePath);
   if (rows.length < 2) return [];
   return rows
     .slice(1)
-    .map((row) => {
-      const mapped = {};
-      IMPORT_COLUMNS.forEach((field, index) => {
-        mapped[field] = row[index];
-      });
-      return mapped;
-    })
+    .map((row) => buildRecordImportData(row))
     .filter((item) => item.application_id && String(item.application_id).trim());
+}
+
+function parseSampleOrderFile(filePath) {
+  const rows = readSpreadsheetRows(filePath);
+  if (rows.length < 2) return { rows: [] };
+  const parsedRows = rows
+    .slice(1)
+    .map((row) => {
+      const data = buildSampleOrderImportData(row);
+      const uniqueKey = toCellValue(data.unique_key) || toCellValue(data.order_id);
+      return { unique_key: uniqueKey, data };
+    })
+    .filter((item) => item.unique_key);
+  return { rows: parsedRows };
+}
+
+function parseAllianceOrderFile(filePath) {
+  const rows = readSpreadsheetRows(filePath);
+  if (rows.length < 2) return { rows: [] };
+  const parsedRows = rows
+    .slice(1)
+    .map((row) => {
+      const data = buildAllianceOrderImportData(row);
+      const uniqueKey = toCellValue(data.unique_key) || toCellValue(data.order_id);
+      return { unique_key: uniqueKey, data };
+    })
+    .filter((item) => item.unique_key);
+  return { rows: parsedRows };
 }
 
 function formatRateValue(value) {
@@ -378,42 +396,6 @@ function formatImportedValue(field, value) {
     return text;
   }
   return toCellValue(value);
-}
-
-function parseSampleOrderFile(filePath) {
-  const workbook = XLSX.readFile(filePath);
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
-  if (rows.length < 2) return { rows: [] };
-  const parsedRows = rows
-    .slice(1)
-    .map((row) => {
-      const data = buildImportedOrderData(row, SAMPLE_ORDER_COLUMN_INDEXES, SAMPLE_ORDER_COLUMNS);
-      return {
-        unique_key: toCellValue(data.unique_key),
-        data,
-      };
-    })
-    .filter((item) => item.unique_key);
-  return { rows: parsedRows };
-}
-
-function parseAllianceOrderFile(filePath) {
-  const workbook = XLSX.readFile(filePath);
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
-  if (rows.length < 2) return { rows: [] };
-  const parsedRows = rows
-    .slice(1)
-    .map((row) => {
-      const data = buildImportedOrderData(row, ALLIANCE_ORDER_COLUMN_INDEXES, ALLIANCE_ORDER_COLUMNS);
-      return {
-        unique_key: toCellValue(data.unique_key),
-        data,
-      };
-    })
-    .filter((item) => item.unique_key);
-  return { rows: parsedRows };
 }
 
 function buildRecordFilters(query, user) {

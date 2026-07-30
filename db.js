@@ -2089,11 +2089,12 @@ function updateRecordFields(id, fields, meta = {}) {
 }
 
 const {
-  SAMPLE_ORDER_COLUMN_INDEXES,
-  ALLIANCE_ORDER_COLUMN_INDEXES,
   SAMPLE_ORDER_COLUMNS,
   ALLIANCE_ORDER_COLUMNS,
+  RECORD_IMPORT_COLUMNS,
   readOrderFieldFromData,
+  buildImportedOrderData,
+  buildRecordImportData,
 } = require('./public/js/order-columns.js');
 
 function migrateRemoveDuplicateSampleTag() {
@@ -2401,7 +2402,9 @@ function extractSampleOrderFields(data) {
     '达人id', '达人ID', 'Buyer Username', 'buyer username', 'BuyerUsername',
   ]);
   const sku_id = readOrderFieldFromData(data, 'sku_id', ['SKU ID', 'Sku ID', 'SKU ID ', 'skuid', 'SKU']);
-  const order_id = readOrderFieldFromData(data, 'order_id', ['Order ID', 'order id', 'OrderID', '订单 ID', '订单id', '订单ID']);
+  const order_id = readOrderFieldFromData(data, 'order_id', [
+    'Order ID', 'order id', 'OrderID', '订单 ID', '订单id', '订单ID', 'Main order ID', 'Platform order ID',
+  ]) || String(data.unique_key ?? '').trim();
   const created_time_raw = readOrderFieldFromData(data, 'created_time_raw', [
     'Created Time', 'created time', 'CreatedTime', 'Creater Time', '寄样日期',
   ]);
@@ -2837,7 +2840,9 @@ function extractAllianceOrderFields(data) {
   const creator_username = readOrderFieldFromData(data, 'creator_username', [
     '达人id', '达人ID', '达人用户名', 'Creator Username', 'creator username',
   ]);
-  const order_id = readOrderFieldFromData(data, 'order_id', ['订单 ID', '订单id', '订单ID', 'Order ID', 'order id']);
+  const order_id = readOrderFieldFromData(data, 'order_id', [
+    'Main order ID', 'Platform order ID', '主订单 ID', '平台订单 ID',
+  ]) || String(data.unique_key ?? '').trim();
   const payment_time_raw = readOrderFieldFromData(data, 'payment_time_raw', ['支付时间', 'Payment Time', 'payment time']);
   const payment_time_ymd = parseCreatedTimeToYmd(payment_time_raw);
   const return_or_refund = readOrderFieldFromData(data, 'full_return', ['已全部退货或全额退款', '已全部退货', '全额退款']);
@@ -5394,10 +5399,9 @@ module.exports = {
   syncSampleDatesToRecords,
   getLatestSampleOrderSummaryByBuyer,
   parseCreatedTimeToYmd,
-  SAMPLE_ORDER_COLUMN_INDEXES,
-  ALLIANCE_ORDER_COLUMN_INDEXES,
   SAMPLE_ORDER_COLUMNS,
   ALLIANCE_ORDER_COLUMNS,
+  RECORD_IMPORT_COLUMNS,
   setAllianceOrderHeaders,
   getAllianceOrderHeaders,
   setLastAllianceOrderImport,

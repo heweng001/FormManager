@@ -2,6 +2,37 @@ const IMPORT_FILE_EXTENSIONS = ['xlsx', 'xls', 'csv'];
 const IMPORT_FILE_ACCEPT = '.xlsx,.xls,.csv';
 const IMPORT_FILE_LABEL = '.xlsx / .xls / .csv';
 
+function renderImportColumnGuideHtml(columns, options = {}) {
+  const list = columns || [];
+  const sourceColumns = options.sourceColumns || [];
+  const notes = []
+    .concat(options.notes || [])
+    .flat()
+    .filter(Boolean);
+  const rows = list
+    .map((column, index) => {
+      const fileCol = sourceColumns[index];
+      const fileColLabel = fileCol ? `第 ${fileCol} 列` : `第 ${index + 1} 列`;
+      return `<tr><td class="col-index">${fileColLabel}</td><td>${escapeHtml(column.label || column.key)}</td><td class="col-key"><code>${escapeHtml(column.key)}</code></td></tr>`;
+    })
+    .join('');
+  const intro = sourceColumns.length
+    ? '系统<strong>忽略首行</strong>（可保留平台表头）。从<strong>第 2 行</strong>起为数据；仅读取下表「文件列序」所示列（其余列忽略）：'
+    : '系统<strong>忽略首行</strong>（可保留平台表头）。从<strong>第 2 行</strong>起为数据；文件列须<strong>从左到右</strong>与下表一致：';
+  return `
+    <div class="erp-import-column-guide">
+      <p class="erp-import-column-guide-title">列映射说明（共 ${list.length} 个字段）</p>
+      <p class="erp-upload-hint">${intro}</p>
+      <div class="erp-import-column-table-wrap">
+        <table class="erp-import-column-table">
+          <thead><tr><th>文件列序</th><th>列表字段名</th><th>字段 key</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${notes.map((note) => `<p class="erp-upload-hint erp-import-column-note">${escapeHtml(note)}</p>`).join('')}
+    </div>`;
+}
+
 const FULFILLMENT_PROGRESS_OPTIONS = [
   '待签收',
   '待发布',

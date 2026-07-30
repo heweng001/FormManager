@@ -54,7 +54,12 @@
               <div id="importPanel" class="erp-import-panel hidden">
                 <div id="dropZone" class="erp-upload-zone compact">
                   <p class="erp-upload-title">拖拽或点击上传 ${IMPORT_FILE_LABEL}</p>
-                  <p class="erp-upload-hint">第 1 行会被跳过，数据从第 2 行开始；第 1 列为唯一标识，重复项仅提示并跳过</p>
+                  ${renderImportColumnGuideHtml(ALLIANCE_ORDER_COLUMNS, {
+                    sourceColumns: ALLIANCE_ORDER_SOURCE_COLUMNS,
+                    notes: [
+                      '首列（第 1 列）为唯一标识，重复记录将跳过；请使用 TikTok 原始导出表格，勿删列。',
+                    ],
+                  })}
                   <input type="file" id="fileInput" accept="${IMPORT_FILE_ACCEPT}" style="display:none" />
                 </div>
                 <p id="fileName" class="erp-meta hidden-text"></p>
