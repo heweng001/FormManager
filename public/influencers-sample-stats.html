@@ -34,6 +34,13 @@
         help: '统计口径：所选寄样时间段内，该负责人对应达人的样品订单条数（每条样品订单计 1）。',
       },
       {
+        key: 'published_video_count',
+        label: '发视频数',
+        group: 'sample',
+        linkType: 'influencer-videos',
+        help: '统计口径：所选寄样时间段内已寄样的达人，在达人视频表中对应的去重内容 ID 数量。',
+      },
+      {
         key: 'ordered_influencer_count',
         label: '出单达人数',
         group: 'alliance',
@@ -53,6 +60,13 @@
         group: 'alliance',
         linkType: 'alliance',
         help: '统计口径：满足出单条件的联盟订单条数（支付时间须晚于对应寄样时间）。',
+      },
+      {
+        key: 'video_recovery_rate',
+        label: '视频回收率',
+        group: 'rate',
+        linkType: null,
+        help: '计算公式：发视频数 ÷ 寄样数 × 100%。',
       },
       {
         key: 'order_rate',
@@ -219,9 +233,18 @@
       return `/influencers-collaborated.html?${params.toString()}`;
     }
 
+    function buildInfluencerVideosLink(assignee) {
+      if (!currentRange) return '#';
+      const params = new URLSearchParams();
+      if (assignee) params.set('assignee_filter', assignee);
+      params.set('sample_date_from', currentRange.start);
+      params.set('sample_date_to', currentRange.end);
+      return `/influencer-videos.html?${params.toString()}`;
+    }
+
     function renderMetricCell(row, metric, assignee) {
       const value = row[metric.key];
-      if (metric.key === 'approval_rate' || metric.key === 'order_rate') {
+      if (metric.key === 'approval_rate' || metric.key === 'order_rate' || metric.key === 'video_recovery_rate') {
         return escapeHtml(formatRatePercent(value));
       }
       if (metric.key === 'avg_order_count') {
@@ -240,6 +263,8 @@
         href = buildAllianceLink(assignee === '__total__' ? '' : assignee);
       } else if (metric.linkType === 'collaborated') {
         href = buildCollaboratedLink(assignee === '__total__' ? '' : assignee);
+      } else if (metric.linkType === 'influencer-videos') {
+        href = buildInfluencerVideosLink(assignee === '__total__' ? '' : assignee);
       }
       return `<a href="${escapeAttr(href)}" class="erp-link-external erp-stats-link">${escapeHtml(text)}</a>`;
     }

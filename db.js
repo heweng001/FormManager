@@ -2378,6 +2378,79 @@ function mergeAllianceAggRows(aggMap, keys) {
   return merged;
 }
 
+function buildInfluencerVideoStatsByCreatorKey() {
+  const statsMap = new Map();
+  queryRows(
+    `
+    SELECT creator_username, content_id
+    FROM influencer_videos
+    WHERE TRIM(COALESCE(creator_username, '')) != ''
+    `
+  ).forEach((row) => {
+    const key = normalizeMatchKey(row.creator_username);
+    if (!key) return;
+    if (!statsMap.has(key)) {
+      statsMap.set(key, { videos: new Set(), creator_username: String(row.creator_username).trim() });
+    }
+    const contentId = String(row.content_id || '').trim();
+    if (contentId) statsMap.get(key).videos.add(contentId);
+    if (!statsMap.get(key).creator_username) {
+      statsMap.get(key).creator_username = String(row.creator_username).trim();
+    }
+  });
+  return statsMap;
+}
+
+function mergePublishedVideoCount(videoMap, keys) {
+  const videos = new Set();
+  keys.forEach((key) => {
+    const agg = videoMap.get(key);
+    if (!agg?.videos) return;
+    agg.videos.forEach((contentId) => videos.add(contentId));
+  });
+  return videos.size;
+}
+
+function countPublishedVideosForCreatorNames(creatorNames, dateFrom, dateTo) {
+  if (!creatorNames.length) return 0;
+  const placeholders = creatorNames.map(() => '?').join(', ');
+  const conditions = [
+    `creator_username IN (${placeholders})`,
+    `TRIM(COALESCE(content_id, '')) != ''`,
+  ];
+  const params = [...creatorNames];
+  if (dateFrom && dateTo) {
+    conditions.push(`TRIM(COALESCE(publish_date_ymd, '')) != ''`);
+    conditions.push(`publish_date_ymd >= ?`);
+    conditions.push(`publish_date_ymd <= ?`);
+    params.push(dateFrom, dateTo);
+  }
+  const row = queryOne(
+    `SELECT COUNT(DISTINCT content_id) AS cnt FROM influencer_videos WHERE ${conditions.join(' AND ')}`,
+    params
+  );
+  return Number(row?.cnt) || 0;
+}
+
+function getSampledCreatorUsernamesForAssigneeInRange(assignee, dateFrom, dateTo) {
+  if (!assignee || !dateFrom || !dateTo) return [];
+  const metaMap = buildInfluencerMetaMapForStats();
+  const names = new Set();
+  queryRows(
+    `SELECT buyer_username, created_time_ymd, created_time_raw
+     FROM sample_orders
+     WHERE TRIM(COALESCE(buyer_username, '')) != ''`
+  ).forEach((order) => {
+    const ymd = order.created_time_ymd || parseCreatedTimeToYmd(order.created_time_raw);
+    if (!ymdInRangeForStats(ymd, dateFrom, dateTo)) return;
+    const meta = getInfluencerMetaForStats(metaMap, order.buyer_username, order.buyer_username);
+    const assignees = getSampleStatsAssigneeTargets(meta, { scope_assignee: undefined });
+    if (!assignees.includes(assignee)) return;
+    names.add(String(order.buyer_username).trim());
+  });
+  return [...names];
+}
+
 function groupNormalizedKeysByCanonical(normalizedKeys, sampleBuyerMap, allianceCreatorMap) {
   const groups = new Map();
   normalizedKeys.forEach((key) => {
@@ -3467,12 +3540,21 @@ function createEmptySampleShipmentStatsRow() {
     audit_tentative: 0,
     approval_rate: null,
     sample_count: 0,
+    published_video_count: 0,
     ordered_influencer_count: 0,
     video_count: 0,
     order_count: 0,
+    video_recovery_rate: null,
     order_rate: null,
     avg_order_count: null,
   };
+}
+
+function calcVideoRecoveryRatePercent(publishedVideoCount, sampleCount) {
+  const published = Number(publishedVideoCount) || 0;
+  const samples = Number(sampleCount) || 0;
+  if (samples <= 0) return null;
+  return (published / samples) * 100;
 }
 
 function finalizeSampleShipmentStatsRow(row) {
@@ -3481,6 +3563,7 @@ function finalizeSampleShipmentStatsRow(row) {
     row.audit_rejected,
     row.audit_tentative
   );
+  row.video_recovery_rate = calcVideoRecoveryRatePercent(row.published_video_count, row.sample_count);
   row.order_rate = calcOrderRatePercent(row.ordered_influencer_count, row.sample_count);
   row.avg_order_count = calcAvgOrderCount(row.order_count, row.sample_count);
   return row;
@@ -3493,6 +3576,7 @@ function sumSampleShipmentStatsRows(rows = []) {
     totals.audit_rejected += row.audit_rejected;
     totals.audit_tentative += row.audit_tentative;
     totals.sample_count += row.sample_count;
+    totals.published_video_count += row.published_video_count;
     totals.ordered_influencer_count += row.ordered_influencer_count;
     totals.video_count += row.video_count;
     totals.order_count += row.order_count;
@@ -3609,6 +3693,7 @@ function getSampleShipmentStats(filters = {}) {
   });
 
   rebuildAllianceOrderDerivedFields();
+  const videoMap = buildInfluencerVideoStatsByCreatorKey();
   queryRows(
     `
     SELECT creator_username, content_id, is_refund, payment_time_ymd
@@ -3663,8 +3748,13 @@ function getSampleShipmentStats(filters = {}) {
     if (!bucket) return finalizeSampleShipmentStatsRow({ assignee, ...createEmptySampleShipmentStatsRow() });
 
     let orderedInfluencerCount = 0;
+    let publishedVideoCount = 0;
     let videoCount = 0;
     let orderCount = 0;
+    bucket.sampledInfluencers.forEach((_sampleDates, influencerKey) => {
+      const videoAgg = videoMap.get(influencerKey);
+      if (videoAgg?.videos?.size) publishedVideoCount += videoAgg.videos.size;
+    });
     bucket.allianceByInfluencer.forEach((agg) => {
       if (agg.orderCount > 0) {
         orderedInfluencerCount += 1;
@@ -3679,6 +3769,7 @@ function getSampleShipmentStats(filters = {}) {
       audit_rejected: bucket.audit.N,
       audit_tentative: bucket.audit.X,
       sample_count: bucket.sample_count,
+      published_video_count: publishedVideoCount,
       ordered_influencer_count: orderedInfluencerCount,
       video_count: videoCount,
       order_count: orderCount,
@@ -3835,6 +3926,30 @@ function buildInfluencerVideoWhere(filters = {}) {
     conditions.push('import_time = ?');
     params.push(filters.import_time);
   }
+  if (filters.assignee_filter && filters.sample_date_from && filters.sample_date_to) {
+    const creators = getSampledCreatorUsernamesForAssigneeInRange(
+      filters.assignee_filter,
+      filters.sample_date_from,
+      filters.sample_date_to
+    );
+    if (!creators.length) {
+      conditions.push('1 = 0');
+    } else {
+      const allNames = new Set();
+      creators.forEach((name) => {
+        allNames.add(String(name).trim());
+        getInfluencerAliasDisplayValues(name).forEach((value) => allNames.add(String(value).trim()));
+      });
+      const nameList = [...allNames].filter(Boolean);
+      if (!nameList.length) {
+        conditions.push('1 = 0');
+      } else {
+        const placeholders = nameList.map(() => '?').join(', ');
+        conditions.push(`creator_username IN (${placeholders})`);
+        params.push(...nameList);
+      }
+    }
+  }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   return { where, params };
 }
@@ -3880,7 +3995,7 @@ function getInfluencerVideoImportTimeOptions(filters = {}) {
   return Promise.resolve({
     import_times: rows.map((row) => ({
       value: row.import_time,
-      label: `${row.import_time}（${row.cnt} 条）`,
+      count: row.cnt,
     })),
   });
 }
@@ -4350,6 +4465,10 @@ function renameInfluencerId(oldInfluencerId, newInfluencerId, updatedBy = '') {
     newValue,
     oldEntityKey,
   ]);
+  db.run(`UPDATE influencer_videos SET creator_username = ? WHERE ${influencerIdMatchCondition('creator_username')}`, [
+    newValue,
+    oldEntityKey,
+  ]);
   db.run(
     `UPDATE influencer_id_aliases
      SET canonical_influencer_id = ?
@@ -4540,6 +4659,7 @@ function buildCollaboratedRows(filters = {}) {
   const allianceCreatorMap = getAllAllianceCreatorIdMap();
   const followUpSummaryMap = getInfluencerFollowUpSummaryMap();
   const emailSendMap = getLatestEmailSendSummaryMap();
+  const videoMap = buildInfluencerVideoStatsByCreatorKey();
   const allKeys = collectRealCollaboratedInfluencerKeys({ sampleBuyerMap, aggMap, recordMap });
   const groupedKeys = groupNormalizedKeysByCanonical(allKeys, sampleBuyerMap, allianceCreatorMap);
 
@@ -4574,6 +4694,7 @@ function buildCollaboratedRows(filters = {}) {
       followUpSummaryMap.get(canonicalKey) || aliasKeys.map((key) => followUpSummaryMap.get(key)).find(Boolean);
     return {
       influencer_id,
+      published_video_count: mergePublishedVideoCount(videoMap, aliasKeys),
       video_count: agg.video_count || 0,
       order_count: agg.order_count || 0,
       refund_count: agg.refund_count || 0,
@@ -4786,23 +4907,43 @@ function calcTrendPercent(current, previous) {
 }
 
 function getCollaboratedMonthlyStats(influencerId) {
-  const names = findAllianceCreatorNamesForInfluencer(influencerId);
+  const allianceNames = findAllianceCreatorNamesForInfluencer(influencerId);
+  const videoCreatorNames = getInfluencerAliasDisplayValues(influencerId);
   const ranges = getCollaboratedMonthRangesBeijing();
-  const total = aggregateAllianceOrderStatsAllTime(names);
-  const last = aggregateAllianceOrderStats(names, ranges.last_month.start, ranges.last_month.end);
-  const current = aggregateAllianceOrderStats(names, ranges.current_month.start, ranges.current_month.end);
+  const total = aggregateAllianceOrderStatsAllTime(allianceNames);
+  const last = aggregateAllianceOrderStats(allianceNames, ranges.last_month.start, ranges.last_month.end);
+  const current = aggregateAllianceOrderStats(allianceNames, ranges.current_month.start, ranges.current_month.end);
   const buildMetric = (key) => ({
     total: total[key],
     last_month: last[key],
     current_month: current[key],
     change_pct: calcTrendPercent(current[key], last[key]),
   });
+  const buildPublishedMetric = () => {
+    const lastMonth = countPublishedVideosForCreatorNames(
+      videoCreatorNames,
+      ranges.last_month.start,
+      ranges.last_month.end
+    );
+    const currentMonth = countPublishedVideosForCreatorNames(
+      videoCreatorNames,
+      ranges.current_month.start,
+      ranges.current_month.end
+    );
+    return {
+      total: countPublishedVideosForCreatorNames(videoCreatorNames),
+      last_month: lastMonth,
+      current_month: currentMonth,
+      change_pct: calcTrendPercent(currentMonth, lastMonth),
+    };
+  };
 
   return Promise.resolve({
     influencer_id: influencerId,
     last_month_label: ranges.last_month.label,
     current_month_label: ranges.current_month.label,
     metrics: {
+      published_video_count: buildPublishedMetric(),
       video_count: buildMetric('video_count'),
       order_count: buildMetric('order_count'),
       refund_count: buildMetric('refund_count'),
@@ -4811,7 +4952,7 @@ function getCollaboratedMonthlyStats(influencerId) {
 }
 
 function sortCollaboratedRows(rows, filters = {}) {
-  const validFields = ['video_count', 'order_count', 'refund_count', 'sample_date'];
+  const validFields = ['published_video_count', 'video_count', 'order_count', 'refund_count', 'sample_date'];
   const field = validFields.includes(filters.sort_field) ? filters.sort_field : 'order_count';
   const order = filters.sort_order === 'asc' ? 1 : -1;
   const applyPin = shouldApplyPinSort(filters);

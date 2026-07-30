@@ -19,6 +19,10 @@
     let importPanelOpen = false;
     const rowSelection = createBatchRowSelection({ deleteIdKey: 'video_ids' });
 
+    let urlAssigneeFilter = '';
+    let urlSampleDateFrom = '';
+    let urlSampleDateTo = '';
+
     async function init() {
       await requireLogin();
       renderShell({
@@ -90,7 +94,23 @@
       });
       bindEvents();
       setupFilterAutofillGuard(['filterContentId', 'filterCreatorUsername']);
+      applyFiltersFromUrl();
       loadVideos();
+    }
+
+    function applyFiltersFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const creator = params.get('creator_username') || '';
+      if (creator) document.getElementById('filterCreatorUsername').value = creator;
+      const contentId = params.get('content_id') || '';
+      if (contentId) document.getElementById('filterContentId').value = contentId;
+      const publishFrom = params.get('publish_date_from') || '';
+      const publishTo = params.get('publish_date_to') || '';
+      if (publishFrom) document.getElementById('filterPublishDateFrom').value = publishFrom;
+      if (publishTo) document.getElementById('filterPublishDateTo').value = publishTo;
+      urlAssigneeFilter = params.get('assignee_filter') || '';
+      urlSampleDateFrom = params.get('sample_date_from') || '';
+      urlSampleDateTo = params.get('sample_date_to') || '';
     }
 
     function getBatchFilters() {
@@ -105,6 +125,9 @@
         publish_date_from: document.getElementById('filterPublishDateFrom').value.trim(),
         publish_date_to: document.getElementById('filterPublishDateTo').value.trim(),
         import_time: document.getElementById('filterImportTime').value.trim(),
+        assignee_filter: urlAssigneeFilter,
+        sample_date_from: urlSampleDateFrom,
+        sample_date_to: urlSampleDateTo,
         page: currentPage,
         pageSize: PAGE_SIZE,
       };
@@ -279,6 +302,9 @@
         document.getElementById('filterImportTime').value = '';
         document.getElementById('filterPublishDateFrom').value = '';
         document.getElementById('filterPublishDateTo').value = '';
+        urlAssigneeFilter = '';
+        urlSampleDateFrom = '';
+        urlSampleDateTo = '';
         currentPage = 1;
         rowSelection.resetSelection(false);
         loadVideos();

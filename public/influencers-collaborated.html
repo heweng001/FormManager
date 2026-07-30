@@ -55,7 +55,7 @@
 
     function getColumnCount() {
 
-      return 12;
+      return 13;
 
     }
 
@@ -161,6 +161,8 @@
 
                   <th class="cell-id">达人id</th><th class="cell-fulfillment">履约进展</th><th class="cell-tags">标签</th><th class="cell-assignee">负责人</th>
 
+                  <th class="erp-sortable cell-published-video-count" data-sort="published_video_count">发视频数 <span class="erp-sort-indicator" data-field="published_video_count">↕</span></th>
+
                   <th class="erp-sortable cell-video-count" data-sort="video_count">出单视频数 <span class="erp-sort-indicator" data-field="video_count">↕</span></th>
 
                   <th class="erp-sortable cell-order-count" data-sort="order_count">出单数 <span class="erp-sort-indicator" data-field="order_count">↕</span></th>
@@ -231,12 +233,13 @@
                   <thead>
                     <tr>
                       <th>指标</th>
+                      <th>发视频数</th>
                       <th>出单视频数</th>
                       <th>出单数</th>
                       <th>退款数</th>
                     </tr>
                   </thead>
-                  <tbody id="trendStatsBody"><tr><td colspan="4" class="erp-empty">加载中...</td></tr></tbody>
+                  <tbody id="trendStatsBody"><tr><td colspan="5" class="erp-empty">加载中...</td></tr></tbody>
                 </table>
               </div>
               <div class="erp-modal-footer"><button id="trendCloseBtn" class="erp-btn erp-btn-primary">关闭</button></div>
@@ -523,6 +526,24 @@
 
 
 
+    function renderPublishedVideoCountCell(row) {
+
+      const key = String(row.influencer_id || '').trim();
+
+      const count = Number(row.published_video_count) || 0;
+
+      const text = String(count);
+
+      if (!key || count <= 0) return escapeHtml(text);
+
+      const href = `/influencer-videos.html?creator_username=${encodeURIComponent(key)}`;
+
+      return `<a href="${escapeAttr(href)}" class="erp-link-external published-video-count-link" title="查看达人视频">${escapeHtml(text)}</a>`;
+
+    }
+
+
+
     function renderOrderCountCell(row) {
 
       const key = String(row.influencer_id || '').trim();
@@ -561,7 +582,7 @@
 
     function renderTrendMetricCells(metrics, picker) {
 
-      const keys = ['video_count', 'order_count', 'refund_count'];
+      const keys = ['published_video_count', 'video_count', 'order_count', 'refund_count'];
 
       return keys.map((key) => `<td>${picker(metrics[key])}</td>`).join('');
 
@@ -651,7 +672,7 @@
 
       meta.textContent = `达人 id：${influencerId}`;
 
-      body.innerHTML = '<tr><td colspan="4" class="erp-empty">统计中...</td></tr>';
+      body.innerHTML = '<tr><td colspan="5" class="erp-empty">统计中...</td></tr>';
 
       modal.classList.remove('hidden');
 
@@ -659,7 +680,7 @@
 
       if (!res.ok) {
 
-        body.innerHTML = `<tr><td colspan="4" class="erp-empty">${escapeHtml(data.message || '加载失败')}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="5" class="erp-empty">${escapeHtml(data.message || '加载失败')}</td></tr>`;
 
         return;
 
@@ -742,6 +763,8 @@
         <td class="cell-tags">${renderTagsCell(key, row.tags)}</td>
 
         <td class="cell-assignee${row.assignee_conflict ? ' assignee-conflict' : ''}" title="${escapeAttr(row.assignee_conflict && row.assignee_names?.length ? row.assignee_names.join('、') : (row.assignee || ''))}">${escapeHtml(row.assignee || '-')}</td>
+
+        <td class="cell-published-video-count">${renderPublishedVideoCountCell(row)}</td>
 
         <td class="cell-video-count">${escapeHtml(String(row.video_count ?? 0))}</td>
 
@@ -1835,7 +1858,7 @@
 
 
 
-      ['video_count', 'order_count', 'refund_count', 'sample_date'].forEach((field) => {
+      ['published_video_count', 'video_count', 'order_count', 'refund_count', 'sample_date'].forEach((field) => {
 
         document.querySelector(`.erp-sort-indicator[data-field="${field}"]`)?.closest('th')?.addEventListener('click', () => toggleSort(field));
 

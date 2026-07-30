@@ -225,6 +225,7 @@ const COLLABORATED_EXPORT_HEADERS = [
   { key: 'fulfillment_progress', label: '履约进展' },
   { key: 'tags', label: '标签' },
   { key: 'assignee', label: '负责人' },
+  { key: 'published_video_count', label: '发视频数' },
   { key: 'video_count', label: '出单视频数' },
   { key: 'order_count', label: '出单数' },
   { key: 'refund_count', label: '退款数' },
@@ -524,7 +525,7 @@ async function handleBatchTagsRequest(req, res, { resolveInfluencerIds }) {
 }
 
 function buildCollaboratedFilters(query, user) {
-  const validSortFields = ['video_count', 'order_count', 'refund_count', 'sample_date'];
+  const validSortFields = ['published_video_count', 'video_count', 'order_count', 'refund_count', 'sample_date'];
   const validTabs = ['all', 'recent_sample', 'ordered', 'no_order'];
   const validSampleDateFilters = ['__empty__', 'has', 'recent_15d', 'older_15d'];
   const sortField = toCellValue(query.sort_field);
@@ -1920,6 +1921,9 @@ app.get('/api/influencer-videos', requireAuth, async (req, res) => {
       publish_date_from: toCellValue(req.query.publish_date_from),
       publish_date_to: toCellValue(req.query.publish_date_to),
       import_time: toCellValue(req.query.import_time),
+      assignee_filter: toCellValue(req.query.assignee_filter),
+      sample_date_from: toCellValue(req.query.sample_date_from),
+      sample_date_to: toCellValue(req.query.sample_date_to),
       page: Math.max(1, parseInt(req.query.page, 10) || 1),
       pageSize: Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50)),
     };
@@ -1945,6 +1949,9 @@ app.get('/api/influencer-videos/filter-options', requireAuth, async (req, res) =
       creator_username: toCellValue(req.query.creator_username),
       publish_date_from: toCellValue(req.query.publish_date_from),
       publish_date_to: toCellValue(req.query.publish_date_to),
+      assignee_filter: toCellValue(req.query.assignee_filter),
+      sample_date_from: toCellValue(req.query.sample_date_from),
+      sample_date_to: toCellValue(req.query.sample_date_to),
     };
     const options = await getInfluencerVideoImportTimeOptions(filters);
     res.json({ success: true, ...options });

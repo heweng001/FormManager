@@ -2247,6 +2247,7 @@ function renderInfluencerCollabDetailHtml(row, renameLogs = []) {
     ['履约进展', escapeHtml(row?.fulfillment_progress || '-')],
     ['标签', renderTagsDisplayReadonly(row?.tags)],
     ['达人备注', escapeHtml(row?.influencer_remark || '-')],
+    ['发视频数', escapeHtml(String(row?.published_video_count ?? 0))],
     ['出单视频数', escapeHtml(String(row?.video_count ?? 0))],
     ['出单数', escapeHtml(String(row?.order_count ?? 0))],
     ['退款数', escapeHtml(String(row?.refund_count ?? 0))],
@@ -2567,6 +2568,7 @@ async function fetchCollabRowForDetail(influencerId) {
   if (!res.ok || !Array.isArray(data.data) || !data.data.length) {
     return {
       influencer_id: id,
+      published_video_count: 0,
       video_count: 0,
       order_count: 0,
       refund_count: 0,
