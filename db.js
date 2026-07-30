@@ -4104,6 +4104,26 @@ function getAllAllianceCreatorIdMap() {
   return map;
 }
 
+function collectRealCollaboratedInfluencerKeys({ sampleBuyerMap, aggMap, recordMap }) {
+  const allKeys = new Set();
+  sampleBuyerMap.forEach((_id, key) => allKeys.add(key));
+  aggMap.forEach((_row, key) => allKeys.add(key));
+  recordMap.forEach((value, key) => {
+    if (Array.isArray(value.sample_dates) && value.sample_dates.length) {
+      allKeys.add(key);
+    }
+  });
+  return allKeys;
+}
+
+function hasRealCollaboration(row) {
+  return (
+    Number(row.order_count || 0) > 0 ||
+    Number(row.sample_order_count || 0) > 0 ||
+    (Array.isArray(row.sample_dates) && row.sample_dates.length > 0)
+  );
+}
+
 function buildCollaboratedRows(filters = {}) {
   rebuildAllianceOrderDerivedFields();
   const conditions = [
@@ -4148,12 +4168,7 @@ function buildCollaboratedRows(filters = {}) {
   const allianceCreatorMap = getAllAllianceCreatorIdMap();
   const followUpSummaryMap = getInfluencerFollowUpSummaryMap();
   const emailSendMap = getLatestEmailSendSummaryMap();
-  const allKeys = new Set();
-  sampleBuyerMap.forEach((_id, key) => allKeys.add(key));
-  allianceCreatorMap.forEach((_id, key) => allKeys.add(key));
-  recordMap.forEach((_value, key) => allKeys.add(key));
-  profileMap.forEach((_value, key) => allKeys.add(key));
-
+  const allKeys = collectRealCollaboratedInfluencerKeys({ sampleBuyerMap, aggMap, recordMap });
   const groupedKeys = groupNormalizedKeysByCanonical(allKeys, sampleBuyerMap, allianceCreatorMap);
 
   let rows = [...groupedKeys.entries()].map(([canonicalKey, aliasKeysSet]) => {
@@ -4213,6 +4228,8 @@ function buildCollaboratedRows(filters = {}) {
       latest_follow_up_at: followSummary?.latest_follow_up_at || '',
     };
   });
+
+  rows = rows.filter(hasRealCollaboration);
 
   if (filters.influencer_id) {
     const keyword = String(filters.influencer_id).trim().toLowerCase();
