@@ -1449,6 +1449,13 @@ async function readTikTokProxyResponse(response) {
   return body;
 }
 
+const DEFAULT_TIKTOK_PROXY = 'http://127.0.0.1:7890';
+
+function canUseLocalProxyForServerFetch() {
+  const host = String(window.location.hostname || '').trim().toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+}
+
 function getStoredTikTokProxy() {
   try {
     return String(localStorage.getItem('tiktok_proxy') || '').trim();
@@ -1457,12 +1464,31 @@ function getStoredTikTokProxy() {
   }
 }
 
-function ensureTikTokProxyConfigured() {
+function getEffectiveTikTokProxy() {
+  const stored = getStoredTikTokProxy();
+  if (stored) return stored;
+  if (canUseLocalProxyForServerFetch()) return DEFAULT_TIKTOK_PROXY;
+  return '';
+}
+
+function initTikTokProxyForScrape() {
   const existing = getStoredTikTokProxy();
   if (existing) return existing;
+  if (!canUseLocalProxyForServerFetch()) return '';
+  try {
+    localStorage.setItem('tiktok_proxy', DEFAULT_TIKTOK_PROXY);
+  } catch {
+    // ignore storage errors
+  }
+  return DEFAULT_TIKTOK_PROXY;
+}
+
+function ensureTikTokProxyConfigured() {
+  const existing = getEffectiveTikTokProxy();
+  if (existing) return existing;
   const input = window.prompt(
-    '当前网络无法访问 TikTok。\n\n若您使用 Clash / V2Ray 等工具，请输入本地代理地址（留空跳过）：',
-    'http://127.0.0.1:7890'
+    '当前网络无法访问 TikTok。\n\n若您使用 Clash / V2Ray 等工具，请输入本地代理地址；访问云服务器 ERP 时也可开启 Clash 系统代理后重试：',
+    DEFAULT_TIKTOK_PROXY
   );
   if (input === null) return '';
   const value = String(input).trim();
@@ -1476,11 +1502,11 @@ function ensureTikTokProxyConfigured() {
   return value;
 }
 
-async function fetchTikTokPageHtmlViaServer(targetUrl, timeoutMs = 15000) {
+async function fetchTikTokPageHtmlViaServer(targetUrl, timeoutMs = 15000, proxyOverride) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const proxy = getStoredTikTokProxy();
+    const proxy = proxyOverride !== undefined ? String(proxyOverride || '').trim() : getEffectiveTikTokProxy();
     const params = new URLSearchParams({ url: targetUrl });
     if (proxy) params.set('proxy', proxy);
     const proxyUrl = `/api/tiktok-fetch-proxy?${params.toString()}`;
@@ -1530,10 +1556,13 @@ async function fetchTikTokPageHtmlViaServiceWorker(targetUrl, timeoutMs = 15000)
 }
 
 async function fetchTikTokPageHtml(targetUrl, timeoutMs = 15000) {
-  const strategies = [
-    () => fetchTikTokPageHtmlViaServiceWorker(targetUrl, timeoutMs),
-    () => fetchTikTokPageHtmlViaServer(targetUrl, timeoutMs),
-  ];
+  const proxy = getEffectiveTikTokProxy();
+  const strategies = [];
+  if (proxy) {
+    strategies.push(() => fetchTikTokPageHtmlViaServer(targetUrl, timeoutMs, proxy));
+  }
+  strategies.push(() => fetchTikTokPageHtmlViaServer(targetUrl, timeoutMs, ''));
+  strategies.push(() => fetchTikTokPageHtmlViaServiceWorker(targetUrl, timeoutMs));
   let lastError = null;
   for (const strategy of strategies) {
     try {
@@ -1632,6 +1661,8 @@ async function runInfluencerEmailScrapeFlow({
   });
   if (!targetRes.ok) throw new Error(targetData.message || '获取抓取目标失败');
 
+  initTikTokProxyForScrape();
+
   const ids = targetData.influencer_ids || [];
   if (!ids.length) {
     return {
@@ -1652,9 +1683,9 @@ async function runInfluencerEmailScrapeFlow({
   });
 
   const failedIds = clientResults.filter((item) => !item.success).map((item) => item.influencer_id);
-  if (failedIds.length && !getStoredTikTokProxy()) {
+  if (failedIds.length && !getEffectiveTikTokProxy()) {
     ensureTikTokProxyConfigured();
-    if (getStoredTikTokProxy()) {
+    if (getEffectiveTikTokProxy()) {
       if (typeof onStatus === 'function') onStatus('已配置代理，正在重试…');
       const retryResults = await scrapeInfluencerEmailsClient(failedIds, (done, total) => {
         if (typeof onStatus === 'function') onStatus(`重试抓取 ${done}/${total}…`);

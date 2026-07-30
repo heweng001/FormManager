@@ -31,6 +31,7 @@ function getTikTokProxyCandidates(overrideProxy = '') {
     process.env.HTTPS_PROXY,
     process.env.HTTP_PROXY,
     'http://127.0.0.1:7890',
+    'socks5h://127.0.0.1:7890',
     'http://127.0.0.1:7897',
     'http://127.0.0.1:1080',
     'http://127.0.0.1:10809',
@@ -49,7 +50,7 @@ function getTikTokProxyCandidates(overrideProxy = '') {
 function isAllowedProxyUrl(rawUrl) {
   try {
     const parsed = new URL(String(rawUrl || '').trim());
-    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+    if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(parsed.protocol)) return false;
     const host = parsed.hostname.toLowerCase();
     if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
     if (/^10\./.test(host)) return true;
@@ -91,7 +92,7 @@ async function fetchTikTokHtmlServerSide(targetUrl, overrideProxy = '') {
   const errors = [];
   const proxies = overrideProxy
     ? [overrideProxy]
-    : ['', ...getTikTokProxyCandidates()];
+    : [...getTikTokProxyCandidates(), ''];
   const seen = new Set();
   for (const proxy of proxies) {
     const key = proxy || 'direct';

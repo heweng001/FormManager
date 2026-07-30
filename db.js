@@ -1340,7 +1340,7 @@ function buildRecordWhereForJoin(filters) {
   const { clause, params } = buildInfluencerScopeClause(filters);
   if (!clause) return { clause: '', params: [] };
   const prefixed = clause.replace(
-    /\b(influencer_id|commission|tags|assignee|sample_date|import_batch_time|imported_by)\b/g,
+    /(?<![.\w])(influencer_id|commission|tags|assignee|sample_date|import_batch_time|imported_by)\b/g,
     'r.$1'
   );
   return { clause: prefixed, params };
