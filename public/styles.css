@@ -811,7 +811,7 @@ body {
 .erp-import-column-table-wrap {
   overflow-x: auto;
   margin: 8px 0;
-  max-height: 220px;
+  max-height: 320px;
   overflow-y: auto;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
@@ -853,6 +853,18 @@ body {
 
 .erp-import-column-note {
   margin: 4px 0 0;
+}
+
+.erp-import-column-table tr.import-col-yes td {
+  background: #fff;
+}
+
+.erp-import-column-table tr.import-col-skip td {
+  background: #f8fafc;
+}
+
+.erp-import-column-table td.import-col-muted {
+  color: #94a3b8;
 }
 
 .erp-empty {

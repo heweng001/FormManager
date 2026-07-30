@@ -70,8 +70,7 @@
                 <button id="batchEmailBtn" class="erp-btn erp-btn-secondary">群发邮件</button>
                 <div class="erp-toolbar-spacer"></div>
                 <button id="toggleImportBtn" class="erp-btn erp-btn-secondary">Excel 导入</button>
-                ${isManager() ? '<button id="batchAssignBtn" class="erp-btn erp-btn-secondary">分配负责人</button><button id="batchDeleteBtn" class="erp-btn erp-btn-danger">批量删除</button>' : ''}
-                <button id="exportBtn" class="erp-btn erp-btn-success">导出 Excel</button>
+                ${isManager() ? '<button id="batchAssignBtn" class="erp-btn erp-btn-secondary">分配负责人</button><button id="batchDeleteBtn" class="erp-btn erp-btn-danger">批量删除</button><button id="exportBtn" class="erp-btn erp-btn-success">导出 Excel</button>' : ''}
               </div>
               <div id="importPanel" class="erp-import-panel hidden">
                 <div id="dropZone" class="erp-upload-zone compact">
@@ -802,7 +801,7 @@
         await loadFilterOptions();
         loadRecords();
       });
-      document.getElementById('exportBtn').addEventListener('click', () => { window.location.href = `/api/export${buildQueryString(getFilters())}`; });
+      document.getElementById('exportBtn')?.addEventListener('click', () => { window.location.href = `/api/export${buildQueryString(getFilters())}`; });
       document.getElementById('prevPageBtn').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadRecords(); } });
       document.getElementById('nextPageBtn').addEventListener('click', () => { if (currentPage < totalPages) { currentPage++; loadRecords(); } });
       ['influencer_id', 'import_batch_time', 'commission'].forEach((field) => {

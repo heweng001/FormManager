@@ -4689,6 +4689,15 @@ function getCollaboratedStats(filters = {}) {
   });
 }
 
+function getCollaboratedRowsForExport(filters = {}) {
+  const baseFilters = { ...filters, collab_tab: 'all' };
+  const { rows: allRows } = buildCollaboratedRows(baseFilters);
+  const tab = filters.collab_tab || 'all';
+  let rows = tab === 'all' ? allRows : allRows.filter((row) => matchesCollaboratedTab(row, tab));
+  rows = sortCollaboratedRows(rows, filters);
+  return Promise.resolve(rows);
+}
+
 function mergeCollaboratedImportRemark(remark, situation) {
   return [String(remark || '').trim(), String(situation || '').trim()].filter(Boolean).join('\n\n');
 }
@@ -5583,6 +5592,7 @@ module.exports = {
   getAllianceOrderIdsByFilters,
   batchDeleteAllianceOrders,
   getCollaboratedStats,
+  getCollaboratedRowsForExport,
   getCollaboratedMonthlyStats,
   getCollaboratedInfluencerIdsByFilters,
   getCollaboratedTabCounts,

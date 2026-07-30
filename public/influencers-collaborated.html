@@ -109,7 +109,7 @@
 
                 <button id="batchEmailBtn" class="erp-btn erp-btn-secondary">群发邮件</button>
 
-                ${isManager() ? '<div class="erp-toolbar-spacer"></div><button id="batchAssignBtn" class="erp-btn erp-btn-secondary">分配负责人</button>' : ''}
+                ${isManager() ? '<div class="erp-toolbar-spacer"></div><button id="batchAssignBtn" class="erp-btn erp-btn-secondary">分配负责人</button><button id="exportBtn" class="erp-btn erp-btn-success">导出 Excel</button>' : ''}
 
               </div>
 
@@ -410,6 +410,13 @@
 
       return filters;
 
+    }
+
+
+
+    function getExportFilters() {
+      const { page, pageSize, ...filters } = getFilters();
+      return filters;
     }
 
 
@@ -1796,6 +1803,10 @@
       document.getElementById('prevPageBtn').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadStats(); } });
 
       document.getElementById('nextPageBtn').addEventListener('click', () => { if (currentPage < totalPages) { currentPage++; loadStats(); } });
+
+      document.getElementById('exportBtn')?.addEventListener('click', () => {
+        window.location.href = `/api/collaborated/export${buildQueryString(getExportFilters())}`;
+      });
 
       document.getElementById('detailCloseBtn').addEventListener('click', () => document.getElementById('detailModal').classList.add('hidden'));
 

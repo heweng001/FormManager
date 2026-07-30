@@ -86,6 +86,7 @@ const {
   getAllianceOrderIdsByFilters,
   batchDeleteAllianceOrders,
   getCollaboratedStats,
+  getCollaboratedRowsForExport,
   getCollaboratedMonthlyStats,
   getCollaboratedInfluencerIdsByFilters,
   getCollaboratedFilterOptions,
@@ -193,6 +194,20 @@ const EXPORT_HEADERS = [
   { key: 'tags', label: '标签' },
   { key: 'remark', label: '备注' },
   { key: 'create_time', label: '导入时间' },
+];
+
+const COLLABORATED_EXPORT_HEADERS = [
+  { key: 'influencer_id', label: '达人id' },
+  { key: 'fulfillment_progress', label: '履约进展' },
+  { key: 'tags', label: '标签' },
+  { key: 'assignee', label: '负责人' },
+  { key: 'video_count', label: '出单视频数' },
+  { key: 'order_count', label: '出单数' },
+  { key: 'refund_count', label: '退款数' },
+  { key: 'influencer_remark', label: '达人备注' },
+  { key: 'sample_date', label: '寄样日期' },
+  { key: 'follow_up_count', label: '跟进记录数' },
+  { key: 'latest_follow_up', label: '最近跟进' },
 ];
 
 app.use(express.json({ limit: '5mb' }));
@@ -1098,6 +1113,31 @@ app.delete('/api/sku-models/:id', requireAuth, requireManager, async (req, res) 
   }
 });
 
+app.get('/api/collaborated/export', requireAuth, requireManager, async (req, res) => {
+  try {
+    const filters = buildCollaboratedFilters(req.query, req.user);
+    const rows = await getCollaboratedRowsForExport(filters);
+    const sheetRows = rows.map((row) => {
+      const item = {};
+      COLLABORATED_EXPORT_HEADERS.forEach(({ key, label }) => {
+        item[label] = row[key] ?? '';
+      });
+      return item;
+    });
+    const worksheet = XLSX.utils.json_to_sheet(sheetRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, '已合作');
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const filename = `已合作_${formatBeijingDateTime(new Date()).slice(0, 10)}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    res.send(buffer);
+  } catch (err) {
+    console.error('已合作导出失败:', err);
+    res.status(500).json({ success: false, message: '导出 Excel 失败' });
+  }
+});
+
 app.get('/api/collaborated-stats', requireAuth, async (req, res) => {
   try {
     const filters = buildCollaboratedFilters(req.query, req.user);
@@ -1921,7 +1961,7 @@ app.post('/api/sample-orders/batch-delete', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/export', requireAuth, async (req, res) => {
+app.get('/api/export', requireAuth, requireManager, async (req, res) => {
   try {
     const filters = buildRecordFilters(req.query, req.user);
     const records = await getAllRecordsForExport(filters);

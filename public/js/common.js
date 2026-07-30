@@ -5,27 +5,67 @@ const IMPORT_FILE_LABEL = '.xlsx / .xls / .csv';
 function renderImportColumnGuideHtml(columns, options = {}) {
   const list = columns || [];
   const sourceColumns = options.sourceColumns || [];
+  const hideFieldKeys = options.hideFieldKeys === true;
+  const fileColumnCount = Number(options.fileColumnCount) || 0;
+  const importCount = list.length;
+  const fileColCount = fileColumnCount || (sourceColumns.length ? Math.max(...sourceColumns) : importCount);
+  const title =
+    options.title ||
+    (fileColumnCount && sourceColumns.length
+      ? `列映射说明（TikTok 导出共 ${fileColCount} 列，导入其中 ${importCount} 列）`
+      : `列映射说明（共 ${importCount} 个字段）`);
   const notes = []
     .concat(options.notes || [])
     .flat()
     .filter(Boolean);
-  const rows = list
-    .map((column, index) => {
-      const fileCol = sourceColumns[index];
-      const fileColLabel = fileCol ? `第 ${fileCol} 列` : `第 ${index + 1} 列`;
-      return `<tr><td class="col-index">${fileColLabel}</td><td>${escapeHtml(column.label || column.key)}</td><td class="col-key"><code>${escapeHtml(column.key)}</code></td></tr>`;
-    })
-    .join('');
-  const intro = sourceColumns.length
-    ? '系统<strong>忽略首行</strong>（可保留平台表头）。从<strong>第 2 行</strong>起为数据；仅读取下表「文件列序」所示列（其余列忽略）：'
-    : '系统<strong>忽略首行</strong>（可保留平台表头）。从<strong>第 2 行</strong>起为数据；文件列须<strong>从左到右</strong>与下表一致：';
+  const fileColHeader = sourceColumns.length ? 'Excel 列号' : '文件列序';
+  const fieldHeader = sourceColumns.length ? '系统字段' : '列表字段名';
+  const statusHeader = fileColumnCount && sourceColumns.length ? '<th>导入</th>' : '';
+  const keyHeader = hideFieldKeys ? '' : '<th>字段 key</th>';
+
+  let rows = '';
+  if (fileColumnCount && sourceColumns.length) {
+    const importMap = new Map();
+    list.forEach((column, index) => {
+      const excelCol = sourceColumns[index];
+      if (excelCol) importMap.set(excelCol, column);
+    });
+    rows = Array.from({ length: fileColumnCount }, (_, index) => {
+      const excelCol = index + 1;
+      const column = importMap.get(excelCol);
+      const keyCell = hideFieldKeys
+        ? ''
+        : `<td class="col-key">${column ? `<code>${escapeHtml(column.key)}</code>` : ''}</td>`;
+      if (column) {
+        return `<tr class="import-col-yes"><td class="col-index">第 ${excelCol} 列</td><td>${escapeHtml(column.label || column.key)}</td><td>是</td>${keyCell}</tr>`;
+      }
+      return `<tr class="import-col-skip"><td class="col-index">第 ${excelCol} 列</td><td class="import-col-muted">—</td><td class="import-col-muted">否</td>${keyCell}</tr>`;
+    }).join('');
+  } else {
+    rows = list
+      .map((column, index) => {
+        const fileCol = sourceColumns[index];
+        const fileColLabel = fileCol ? `第 ${fileCol} 列` : `第 ${index + 1} 列`;
+        const keyCell = hideFieldKeys
+          ? ''
+          : `<td class="col-key"><code>${escapeHtml(column.key)}</code></td>`;
+        return `<tr><td class="col-index">${fileColLabel}</td><td>${escapeHtml(column.label || column.key)}</td>${keyCell}</tr>`;
+      })
+      .join('');
+  }
+
+  const intro = fileColumnCount && sourceColumns.length
+    ? `系统<strong>忽略第 1 行表头</strong>，从<strong>第 2 行</strong>起读取数据。请使用 TikTok 原始导出文件（共 ${fileColCount} 列，勿删列）；下表列出全部列，标记为「是」的 ${importCount} 列会被导入：`
+    : sourceColumns.length
+      ? '系统<strong>忽略第 1 行表头</strong>，从<strong>第 2 行</strong>起读取数据。请使用 TikTok 原始导出文件（勿删列）；仅读取下表「Excel 列号」所示列，其余列忽略：'
+      : '系统<strong>忽略首行</strong>（可保留平台表头）。从<strong>第 2 行</strong>起为数据；文件列须<strong>从左到右</strong>与下表一致：';
   return `
     <div class="erp-import-column-guide">
-      <p class="erp-import-column-guide-title">列映射说明（共 ${list.length} 个字段）</p>
+      <p class="erp-import-column-guide-title">${escapeHtml(title)}</p>
       <p class="erp-upload-hint">${intro}</p>
       <div class="erp-import-column-table-wrap">
         <table class="erp-import-column-table">
-          <thead><tr><th>文件列序</th><th>列表字段名</th><th>字段 key</th></tr></thead>
+          <thead><tr><th>${fileColHeader}</th><th>${fieldHeader}</th>${statusHeader}${keyHeader}</tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>

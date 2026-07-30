@@ -57,10 +57,11 @@
                   <p class="erp-upload-title">拖拽或点击上传 ${IMPORT_FILE_LABEL}</p>
                   ${renderImportColumnGuideHtml(ALLIANCE_ORDER_COLUMNS, {
                     sourceColumns: ALLIANCE_ORDER_SOURCE_COLUMNS,
+                    fileColumnCount: ALLIANCE_ORDER_FILE_COLUMN_COUNT,
+                    hideFieldKeys: true,
                     notes: [
-                      '列表表头固定如上，与 Excel 导出表头文字无关；第 1 行会被跳过。',
-                      '订单 id（第 1 列）为唯一标识：重复导入时将覆盖已有记录。',
-                      '请使用 TikTok 原始导出表格，勿删列。',
+                      '请上传 TikTok 联盟订单原始导出文件，保持完整 29 列结构，勿删列、勿改列序。',
+                      '订单 id（Excel 第 1 列）为唯一标识；相同订单 id 重复导入时将覆盖已有记录。',
                     ],
                   })}
                   <input type="file" id="fileInput" accept="${IMPORT_FILE_ACCEPT}" style="display:none" />
