@@ -3970,35 +3970,36 @@ function importInfluencerVideosBatch({ rows, imported_by, import_time }) {
   return Promise.resolve({ inserted, skipped, duplicateKeys, import_time: batchImportTime });
 }
 
-function buildInfluencerVideoWhere(filters = {}) {
+function buildInfluencerVideoWhere(filters = {}, tableAlias = '') {
+  const col = (name) => (tableAlias ? `${tableAlias}.${name}` : name);
   const conditions = [];
   const params = [];
   if (filters.content_id) {
-    conditions.push('content_id LIKE ?');
+    conditions.push(`${col('content_id')} LIKE ?`);
     params.push(`%${filters.content_id}%`);
   }
   if (filters.creator_username) {
     const keyword = String(filters.creator_username).trim();
     const aliasValues = getInfluencerAliasDisplayValues(keyword);
     if (aliasValues.length > 1 || resolveCanonicalInfluencerId(keyword) !== keyword) {
-      const clauses = aliasValues.map(() => 'creator_username LIKE ?');
+      const clauses = aliasValues.map(() => `${col('creator_username')} LIKE ?`);
       conditions.push(`(${clauses.join(' OR ')})`);
       aliasValues.forEach((value) => params.push(`%${value}%`));
     } else {
-      conditions.push('creator_username LIKE ?');
+      conditions.push(`${col('creator_username')} LIKE ?`);
       params.push(`%${keyword}%`);
     }
   }
   if (filters.publish_date_from) {
-    conditions.push('TRIM(COALESCE(publish_date_ymd, \'\')) >= ?');
+    conditions.push(`TRIM(COALESCE(${col('publish_date_ymd')}, '')) >= ?`);
     params.push(filters.publish_date_from);
   }
   if (filters.publish_date_to) {
-    conditions.push('TRIM(COALESCE(publish_date_ymd, \'\')) <= ?');
+    conditions.push(`TRIM(COALESCE(${col('publish_date_ymd')}, '')) <= ?`);
     params.push(filters.publish_date_to);
   }
   if (filters.import_time) {
-    conditions.push('import_time = ?');
+    conditions.push(`${col('import_time')} = ?`);
     params.push(filters.import_time);
   }
   if (filters.assignee_filter && filters.sample_date_from && filters.sample_date_to) {
@@ -4017,7 +4018,7 @@ function buildInfluencerVideoWhere(filters = {}) {
         conditions.push('1 = 0');
       } else {
         const placeholders = contentIds.map(() => '?').join(', ');
-        conditions.push(`content_id IN (${placeholders})`);
+        conditions.push(`${col('content_id')} IN (${placeholders})`);
         params.push(...contentIds);
       }
     } else {
@@ -4039,7 +4040,7 @@ function buildInfluencerVideoWhere(filters = {}) {
           conditions.push('1 = 0');
         } else {
           const placeholders = nameList.map(() => '?').join(', ');
-          conditions.push(`creator_username IN (${placeholders})`);
+          conditions.push(`${col('creator_username')} IN (${placeholders})`);
           params.push(...nameList);
         }
       }
@@ -4049,22 +4050,63 @@ function buildInfluencerVideoWhere(filters = {}) {
   return { where, params };
 }
 
+function buildAllianceOrderStatsByContentIdSubquerySql() {
+  return `
+    SELECT TRIM(content_id) AS content_id,
+      COUNT(*) AS order_count,
+      SUM(CASE WHEN ${allianceOrderIsRefundedSql('ao')} THEN 1 ELSE 0 END) AS refund_count
+    FROM alliance_orders ao
+    WHERE TRIM(COALESCE(ao.content_id, '')) != ''
+      AND ${allianceOrderPaymentTimeValidConditions('ao').join(' AND ')}
+    GROUP BY TRIM(ao.content_id)
+  `;
+}
+
+function resolveInfluencerVideoSort(filters = {}) {
+  const validFields = ['import_time', 'order_count', 'refund_count'];
+  const field = validFields.includes(filters.sort_field) ? filters.sort_field : 'order_count';
+  const order = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
+  return { field, order };
+}
+
+function buildInfluencerVideoOrderByClause(sortField, sortOrder) {
+  if (sortField === 'import_time') {
+    return `iv.import_time ${sortOrder}, iv.id DESC`;
+  }
+  if (sortField === 'refund_count') {
+    return `COALESCE(ao_stats.refund_count, 0) ${sortOrder}, iv.id DESC`;
+  }
+  return `COALESCE(ao_stats.order_count, 0) ${sortOrder}, iv.id DESC`;
+}
+
 function getInfluencerVideos(filters = {}) {
-  const { where, params } = buildInfluencerVideoWhere(filters);
+  rebuildAllianceOrderDerivedFields();
+  const { where, params } = buildInfluencerVideoWhere(filters, 'iv');
+  const { field: sortField, order: sortOrder } = resolveInfluencerVideoSort(filters);
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
   const pageSize = Math.min(200, Math.max(1, parseInt(filters.pageSize, 10) || 50));
   const offset = (page - 1) * pageSize;
-  const total = queryOne(`SELECT COUNT(*) AS total FROM influencer_videos ${where}`, params)?.total || 0;
+  const statsSubquery = buildAllianceOrderStatsByContentIdSubquerySql();
+  const joinFrom = `
+    FROM influencer_videos iv
+    LEFT JOIN (${statsSubquery}) ao_stats
+      ON TRIM(COALESCE(iv.content_id, '')) = ao_stats.content_id
+  `;
+  const total = queryOne(`SELECT COUNT(*) AS total ${joinFrom} ${where}`, params)?.total || 0;
+  const orderBy = buildInfluencerVideoOrderByClause(sortField, sortOrder);
   const rows = queryRows(
-    `SELECT id, unique_key, data_json, video_title, content_id, publish_date_raw, publish_date_ymd,
-            video_url, creator_username, product_id, imported_by, import_time
-     FROM influencer_videos ${where}
-     ORDER BY id DESC
-     LIMIT ? OFFSET ?`,
+    `
+    SELECT iv.id, iv.unique_key, iv.data_json, iv.video_title, iv.content_id, iv.publish_date_raw, iv.publish_date_ymd,
+           iv.video_url, iv.creator_username, iv.product_id, iv.imported_by, iv.import_time,
+           COALESCE(ao_stats.order_count, 0) AS order_count,
+           COALESCE(ao_stats.refund_count, 0) AS refund_count
+    ${joinFrom}
+    ${where}
+    ORDER BY ${orderBy}
+    LIMIT ? OFFSET ?
+    `,
     [...params, pageSize, offset]
   );
-  rebuildAllianceOrderDerivedFields();
-  const allianceByContentId = buildAllianceOrderStatsByContentId();
   const enrichedRows = rows.map((row) => {
     let data = {};
     try {
@@ -4072,13 +4114,11 @@ function getInfluencerVideos(filters = {}) {
     } catch {
       data = {};
     }
-    const contentId = String(row.content_id || '').trim();
-    const stats = allianceByContentId.get(contentId) || { order_count: 0, refund_count: 0 };
     return {
       ...row,
       data,
-      order_count: stats.order_count,
-      refund_count: stats.refund_count,
+      order_count: Number(row.order_count) || 0,
+      refund_count: Number(row.refund_count) || 0,
     };
   });
   return Promise.resolve({

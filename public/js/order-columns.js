@@ -38,10 +38,12 @@ const INFLUENCER_VIDEO_COLUMNS = [
   { key: 'product_id', label: '商品id', legacyAliases: ['商品id', '商品 ID', 'Product ID', 'product_id'] },
 ];
 
+const INFLUENCER_VIDEO_SORTABLE_FIELDS = ['import_time', 'order_count', 'refund_count'];
+
 const INFLUENCER_VIDEO_DISPLAY_COLUMNS = [
   ...INFLUENCER_VIDEO_COLUMNS,
-  { key: 'order_count', label: '出单数' },
-  { key: 'refund_count', label: '退款数' },
+  { key: 'order_count', label: '出单数', sortable: true },
+  { key: 'refund_count', label: '退款数', sortable: true },
 ];
 
 const SAMPLE_ORDER_COLUMNS = [

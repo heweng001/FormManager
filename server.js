@@ -1924,6 +1924,8 @@ app.get('/api/influencer-videos', requireAuth, async (req, res) => {
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
       publish_after_sample: toCellValue(req.query.publish_after_sample),
+      sort_field: toCellValue(req.query.sort_field),
+      sort_order: toCellValue(req.query.sort_order),
       page: Math.max(1, parseInt(req.query.page, 10) || 1),
       pageSize: Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50)),
     };

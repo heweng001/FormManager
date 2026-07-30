@@ -12,8 +12,11 @@
   <script>
     const PAGE_SIZE = 50;
     const XLSX_ACCEPT = '.xlsx';
+    const SORTABLE_FIELDS = ['import_time', 'order_count', 'refund_count'];
     let currentPage = 1;
     let totalPages = 1;
+    let sortField = 'order_count';
+    let sortOrder = 'desc';
     const tableColumns = INFLUENCER_VIDEO_DISPLAY_COLUMNS;
     let selectedFile = null;
     let importPanelOpen = false;
@@ -23,6 +26,173 @@
     let urlSampleDateFrom = '';
     let urlSampleDateTo = '';
     let urlPublishAfterSample = '';
+
+    function buildAllianceOrdersLink(contentId, fullRefund = false) {
+      const params = new URLSearchParams();
+      params.set('content_id', contentId);
+      if (fullRefund) params.set('full_refund', '1');
+      return `/alliance-orders.html?${params.toString()}`;
+    }
+
+    function renderCreatorUsernameCell(row) {
+      const id = String(row.creator_username || '').trim();
+      const key = escapeAttr(id);
+      const linkHtml = id ? renderInfluencerLink(id) : '<span class="erp-meta">-</span>';
+      const trendBtn = id
+        ? `<button type="button" class="erp-trend-btn" data-influencer-id="${key}" title="月度出单对比" aria-label="月度出单对比"><span class="erp-trend-icon" aria-hidden="true"></span></button>`
+        : '';
+      const viewBtn = id
+        ? `<button type="button" class="erp-btn erp-btn-secondary erp-btn-view erp-btn-view-inline view-influencer-detail-btn" data-influencer-id="${key}">查看</button>`
+        : '';
+      return `<td class="cell-creator cell-truncate"><span class="erp-influencer-id-wrap"><span class="erp-influencer-id-cell">${linkHtml}${trendBtn}${viewBtn}</span></span></td>`;
+    }
+
+    function renderAllianceStatCell(row, field) {
+      const contentId = String(row.content_id || '').trim();
+      const count = Number(row[field]) || 0;
+      const text = String(count);
+      if (!contentId || count <= 0) {
+        return `<td class="cell-stat">${escapeHtml(text)}</td>`;
+      }
+      const href = buildAllianceOrdersLink(contentId, field === 'refund_count');
+      const title = field === 'refund_count' ? '查看已全部退款的联盟订单' : '查看联盟订单';
+      return `<td class="cell-stat"><a href="${escapeAttr(href)}" class="erp-link-external" title="${escapeAttr(title)}">${escapeHtml(text)}</a></td>`;
+    }
+
+    function renderInfluencerVideoCell(row, column) {
+      if (column.key === 'creator_username') return renderCreatorUsernameCell(row);
+      if (column.key === 'order_count') return renderAllianceStatCell(row, 'order_count');
+      if (column.key === 'refund_count') return renderAllianceStatCell(row, 'refund_count');
+      return renderOrderTableCellHtml(row, column);
+    }
+
+    function renderTableHead() {
+      const displayColumns = buildOrderDisplayColumns(tableColumns);
+      const headers = displayColumns.map((column) => {
+        const sortKey = column.key === ORDER_IMPORT_TIME_HEADER ? 'import_time' : column.key;
+        if (SORTABLE_FIELDS.includes(sortKey)) {
+          const label = column.key === ORDER_IMPORT_TIME_HEADER ? '导入时间' : (column.label || column.key);
+          return `<th class="erp-sortable${column.key === ORDER_IMPORT_TIME_HEADER ? ' cell-import-time' : ''}" data-sort="${sortKey}">${escapeHtml(label)} <span class="erp-sort-indicator" data-field="${sortKey}">↕</span></th>`;
+        }
+        if (column.key === ORDER_IMPORT_TIME_HEADER) {
+          return renderOrderImportTimeHeader();
+        }
+        return `<th>${escapeHtml(column.label || column.key)}</th>`;
+      }).join('');
+      const thead = document.getElementById('influencerVideoHead');
+      thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}${headers}</tr>`;
+      rowSelection.setupSelectAllMenu();
+      SORTABLE_FIELDS.forEach((field) => {
+        document.querySelector(`.erp-sort-indicator[data-field="${field}"]`)?.closest('th')?.addEventListener('click', () => toggleSort(field));
+      });
+      updateSortIndicators();
+    }
+
+    function renderTableBody(rows) {
+      const displayColumns = buildOrderDisplayColumns(tableColumns);
+      const tbody = document.getElementById('influencerVideoBody');
+      const colSpan = Math.max(displayColumns.length, 1) + 1;
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="${colSpan}" class="erp-empty">暂无记录</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = rows.map((row) => {
+        return `
+          <tr class="influencer-video-row" data-id="${row.id}" id="influencer-video-${row.id}">
+            ${rowSelection.renderCheckboxCell(row.id)}
+            ${displayColumns.map((column) => renderInfluencerVideoCell(row, column)).join('')}
+          </tr>
+        `;
+      }).join('');
+      rowSelection.bindRowCheckboxes();
+      bindRowActions();
+    }
+
+    function bindRowActions() {
+      document.querySelectorAll('.view-influencer-detail-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const influencerId = btn.dataset.influencerId;
+          showInfluencerDetailModal({
+            influencerId,
+            defaultTab: 'collab',
+            enableFollowUp: true,
+          });
+        });
+      });
+      document.querySelectorAll('.erp-trend-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openTrendModal(btn.dataset.influencerId);
+        });
+      });
+    }
+
+    function updateSortIndicators() {
+      document.querySelectorAll('#influencerVideoTable .erp-sort-indicator').forEach((el) => {
+        const field = el.dataset.field;
+        const active = field === sortField;
+        el.textContent = active ? (sortOrder === 'asc' ? '↑' : '↓') : '↕';
+        el.classList.toggle('active', active);
+      });
+    }
+
+    function toggleSort(field) {
+      if (sortField === field) sortOrder = sortOrder === 'desc' ? 'asc' : 'desc';
+      else {
+        sortField = field;
+        sortOrder = 'desc';
+      }
+      currentPage = 1;
+      rowSelection.resetSelection(false);
+      loadVideos();
+    }
+
+    function formatTrendPct(pct) {
+      const num = Number(pct) || 0;
+      if (num > 0) return `<span class="erp-trend-pct up">+${num.toFixed(1)}%</span>`;
+      if (num < 0) return `<span class="erp-trend-pct down">${num.toFixed(1)}%</span>`;
+      return `<span class="erp-trend-pct flat">0.0%</span>`;
+    }
+
+    function renderTrendMetricCells(metrics, picker) {
+      const keys = ['published_video_count', 'video_count', 'order_count', 'refund_count'];
+      return keys.map((key) => `<td>${picker(metrics[key])}</td>`).join('');
+    }
+
+    function renderTrendTableBody(stats) {
+      const metrics = stats.metrics || {};
+      const rows = [
+        ['历史总计', (metric) => escapeHtml(String(metric?.total ?? 0))],
+        ['上月', (metric) => escapeHtml(String(metric?.last_month ?? 0))],
+        ['本月', (metric) => escapeHtml(String(metric?.current_month ?? 0))],
+        ['环比', (metric) => formatTrendPct(metric?.change_pct)],
+      ];
+      return rows.map(([label, picker]) => `
+        <tr>
+          <td>${escapeHtml(label)}</td>
+          ${renderTrendMetricCells(metrics, picker)}
+        </tr>
+      `).join('');
+    }
+
+    async function openTrendModal(influencerId) {
+      const modal = document.getElementById('trendModal');
+      const body = document.getElementById('trendStatsBody');
+      const meta = document.getElementById('trendModalMeta');
+      if (!modal || !body) return;
+      meta.textContent = `达人 id：${influencerId}`;
+      body.innerHTML = '<tr><td colspan="5" class="erp-empty">统计中...</td></tr>';
+      modal.classList.remove('hidden');
+      const { res, data } = await api(`/api/collaborated/monthly-stats/${encodeURIComponent(influencerId)}`);
+      if (!res.ok) {
+        body.innerHTML = `<tr><td colspan="5" class="erp-empty">${escapeHtml(data.message || '加载失败')}</td></tr>`;
+        return;
+      }
+      const stats = data.data;
+      meta.textContent = `达人 id：${influencerId}（${stats.last_month_label || '上月'} vs ${stats.current_month_label || '本月'}）`;
+      body.innerHTML = renderTrendTableBody(stats);
+    }
 
     async function init() {
       await requireLogin();
@@ -71,7 +241,7 @@
           </div>
           <div class="erp-card">
             <div class="erp-table-wrap">
-              <table class="erp-table" id="influencerVideoTable">
+              <table class="erp-table erp-table-influencer-videos" id="influencerVideoTable">
                 <thead id="influencerVideoHead"><tr><th>加载中...</th></tr></thead>
                 <tbody id="influencerVideoBody"><tr><td class="erp-empty">加载中...</td></tr></tbody>
               </table>
@@ -89,6 +259,43 @@
               <div class="erp-modal-header">导入完成</div>
               <div class="erp-modal-body"><p id="importMessage"></p></div>
               <div class="erp-modal-footer"><button id="importCloseBtn" class="erp-btn erp-btn-primary">确定</button></div>
+            </div>
+          </div>
+          <div id="detailModal" class="erp-modal-overlay hidden">
+            <div class="erp-modal erp-modal-wide">
+              <div class="erp-modal-header">达人详情</div>
+              <div class="erp-modal-body">
+                <div class="erp-tabs erp-detail-modal-tabs" id="influencerDetailTabs">
+                  <button type="button" class="erp-tab active" data-tab="audit">审核信息</button>
+                  <button type="button" class="erp-tab" data-tab="collab">合作信息</button>
+                  <button type="button" class="erp-tab" data-tab="followup">跟进记录</button>
+                </div>
+                <div id="detailAuditContent" class="erp-detail-stack"></div>
+                <div id="detailCollabContent" class="erp-detail-grid hidden"></div>
+                <div id="detailFollowUpContent" class="erp-detail-followup hidden"></div>
+              </div>
+              <div class="erp-modal-footer"><button id="detailCloseBtn" class="erp-btn erp-btn-primary">关闭</button></div>
+            </div>
+          </div>
+          <div id="trendModal" class="erp-modal-overlay erp-trend-modal hidden">
+            <div class="erp-modal">
+              <div class="erp-modal-header">月度出单对比</div>
+              <div class="erp-modal-body erp-trend-modal-body">
+                <p id="trendModalMeta" class="erp-meta erp-trend-meta"></p>
+                <table class="erp-table erp-trend-table" id="trendStatsTable">
+                  <thead>
+                    <tr>
+                      <th>指标</th>
+                      <th>发视频数</th>
+                      <th>出单视频数</th>
+                      <th>出单数</th>
+                      <th>退款数</th>
+                    </tr>
+                  </thead>
+                  <tbody id="trendStatsBody"><tr><td colspan="5" class="erp-empty">加载中...</td></tr></tbody>
+                </table>
+              </div>
+              <div class="erp-modal-footer"><button id="trendCloseBtn" class="erp-btn erp-btn-primary">关闭</button></div>
             </div>
           </div>
         `,
@@ -116,7 +323,7 @@
     }
 
     function getBatchFilters() {
-      const { page, pageSize, import_time, ...filters } = getFilters();
+      const { page, pageSize, import_time, sort_field, sort_order, ...filters } = getFilters();
       return filters;
     }
 
@@ -131,6 +338,8 @@
         sample_date_from: urlSampleDateFrom,
         sample_date_to: urlSampleDateTo,
         publish_after_sample: urlPublishAfterSample,
+        sort_field: sortField,
+        sort_order: sortOrder,
         page: currentPage,
         pageSize: PAGE_SIZE,
       };
@@ -143,29 +352,6 @@
       });
       const q = params.toString();
       return q ? `?${q}` : '';
-    }
-
-    function renderTableHead() {
-      const thead = document.getElementById('influencerVideoHead');
-      thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}${renderOrderTableHeadHtml(tableColumns)}</tr>`;
-      rowSelection.setupSelectAllMenu();
-    }
-
-    function renderTableBody(rows) {
-      const displayColumns = buildOrderDisplayColumns(tableColumns);
-      const tbody = document.getElementById('influencerVideoBody');
-      const colSpan = Math.max(displayColumns.length, 1) + 1;
-      if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="${colSpan}" class="erp-empty">暂无记录</td></tr>`;
-        return;
-      }
-      tbody.innerHTML = rows.map((row) => `
-        <tr class="influencer-video-row" data-id="${row.id}" id="influencer-video-${row.id}">
-          ${rowSelection.renderCheckboxCell(row.id)}
-          ${displayColumns.map((column) => renderOrderTableCellHtml(row, column)).join('')}
-        </tr>
-      `).join('');
-      rowSelection.bindRowCheckboxes();
     }
 
     async function loadImportTimeFilterOptions() {
@@ -183,7 +369,7 @@
       await loadImportTimeFilterOptions();
       const { res, data } = await api(`/api/influencer-videos${buildQueryString(getFilters())}`);
       const tbody = document.getElementById('influencerVideoBody');
-      const colSpan = Math.max(buildOrderDisplayColumns(tableColumns).length, 1) + 1;
+      const colSpan = Math.max(buildOrderDisplayColumns(tableColumns).length, 1) + 2;
       if (!res.ok) {
         tbody.innerHTML = `<tr><td colspan="${colSpan}" class="erp-empty">加载失败</td></tr>`;
         return;
@@ -309,6 +495,8 @@
         urlSampleDateFrom = '';
         urlSampleDateTo = '';
         urlPublishAfterSample = '';
+        sortField = 'order_count';
+        sortOrder = 'desc';
         currentPage = 1;
         rowSelection.resetSelection(false);
         loadVideos();
@@ -319,6 +507,12 @@
         document.getElementById('importModal').classList.add('hidden');
         currentPage = 1;
         loadVideos();
+      });
+      document.getElementById('trendCloseBtn')?.addEventListener('click', () => {
+        document.getElementById('trendModal')?.classList.add('hidden');
+      });
+      document.getElementById('trendModal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'trendModal') e.target.classList.add('hidden');
       });
       ['filterContentId', 'filterCreatorUsername'].forEach((id) => {
         document.getElementById(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { currentPage = 1; rowSelection.resetSelection(false); loadVideos(); } });
