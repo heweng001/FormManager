@@ -534,6 +534,24 @@
 
 
 
+    function renderRefundCountCell(row) {
+
+      const key = String(row.influencer_id || '').trim();
+
+      const count = Number(row.refund_count) || 0;
+
+      const text = String(count);
+
+      if (!key || count <= 0) return escapeHtml(text);
+
+      const href = `/alliance-orders.html?creator_username=${encodeURIComponent(key)}&full_refund=1`;
+
+      return `<a href="${escapeAttr(href)}" class="erp-link-external refund-count-link" title="查看已全部退款的联盟订单">${escapeHtml(text)}</a>`;
+
+    }
+
+
+
     function renderTrendMetricCells(metrics, picker) {
 
       const keys = ['video_count', 'order_count', 'refund_count'];
@@ -722,7 +740,7 @@
 
         <td class="cell-order-count">${renderOrderCountCell(row)}</td>
 
-        <td class="cell-refund-count ${refundRateAlertClass(row)}">${escapeHtml(String(row.refund_count ?? 0))}</td>
+        <td class="cell-refund-count ${refundRateAlertClass(row)}">${renderRefundCountCell(row)}</td>
 
         <td class="cell-remark">${renderRemarkInput(key, row.influencer_remark)}</td>
 

@@ -1694,6 +1694,7 @@ app.get('/api/alliance-orders', requireAuth, async (req, res) => {
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
       import_time: toCellValue(req.query.import_time),
+      full_refund: toCellValue(req.query.full_refund) === '1' ? '1' : '',
       page: Math.max(1, parseInt(req.query.page, 10) || 1),
       pageSize: Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50)),
     };

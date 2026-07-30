@@ -2279,18 +2279,84 @@ function collectSampleOrdersForInfluencer(maps, influencerId) {
   );
 }
 
+function isAllianceOrderRefunded(order) {
+  if (Number(order?.is_refund) === 1) return true;
+  return isYesValue(order?.full_refund);
+}
+
+function allianceOrderPaymentTimeValidConditions(tableAlias = '') {
+  const prefix = tableAlias ? `${tableAlias}.` : '';
+  return [
+    `TRIM(COALESCE(${prefix}payment_time_ymd, '')) != ''`,
+    `CAST(SUBSTR(${prefix}payment_time_ymd, 5, 2) AS INTEGER) BETWEEN 1 AND 12`,
+    `CAST(SUBSTR(${prefix}payment_time_ymd, 7, 2) AS INTEGER) BETWEEN 1 AND 31`,
+  ];
+}
+
+function allianceOrderIsRefundedSql(tableAlias = '') {
+  const prefix = tableAlias ? `${tableAlias}.` : '';
+  return `(
+    ${prefix}is_refund = 1
+    OR TRIM(COALESCE(${prefix}full_refund, '')) IN ('是', 'yes', 'YES', 'Yes', 'Y', 'y')
+  )`;
+}
+
+function buildAllianceOrderStatsByInfluencerKey() {
+  const statsMap = new Map();
+  const ensure = (key) => {
+    if (!statsMap.has(key)) {
+      statsMap.set(key, { order_count: 0, refund_count: 0, videos: new Set(), creator_username: '' });
+    }
+    return statsMap.get(key);
+  };
+
+  queryRows(
+    `
+    SELECT creator_username, content_id, is_refund, full_refund, payment_time_ymd
+    FROM alliance_orders
+    WHERE TRIM(COALESCE(creator_username, '')) != ''
+      AND ${allianceOrderPaymentTimeValidConditions().join(' AND ')}
+    `
+  ).forEach((order) => {
+    const key = normalizeMatchKey(order.creator_username);
+    if (!key) return;
+    const agg = ensure(key);
+    agg.order_count += 1;
+    if (!agg.creator_username) agg.creator_username = String(order.creator_username).trim();
+    const contentId = String(order.content_id || '').trim();
+    if (contentId) agg.videos.add(contentId);
+    if (isAllianceOrderRefunded(order)) agg.refund_count += 1;
+  });
+
+  const aggMap = new Map();
+  statsMap.forEach((agg, key) => {
+    aggMap.set(key, {
+      creator_username: agg.creator_username,
+      order_count: agg.order_count,
+      video_count: agg.videos.size,
+      refund_count: agg.refund_count,
+      videos: agg.videos,
+    });
+  });
+  return aggMap;
+}
+
 function mergeAllianceAggRows(aggMap, keys) {
+  const videos = new Set();
   const merged = { video_count: 0, order_count: 0, refund_count: 0, creator_username: '' };
   keys.forEach((key) => {
     const agg = aggMap.get(key);
     if (!agg) return;
-    merged.video_count += Number(agg.video_count) || 0;
     merged.order_count += Number(agg.order_count) || 0;
     merged.refund_count += Number(agg.refund_count) || 0;
+    if (agg.videos) {
+      agg.videos.forEach((contentId) => videos.add(contentId));
+    }
     if (!merged.creator_username && agg.creator_username) {
       merged.creator_username = String(agg.creator_username).trim();
     }
   });
+  merged.video_count = videos.size;
   return merged;
 }
 
@@ -3156,6 +3222,9 @@ function buildAllianceOrderWhere(filters = {}) {
   if (filters.order_id) {
     conditions.push('order_id LIKE ?');
     params.push(`%${filters.order_id}%`);
+  }
+  if (filters.full_refund === '1' || filters.full_refund === 1 || filters.is_refund === '1' || filters.is_refund === 1) {
+    conditions.push(allianceOrderIsRefundedSql());
   }
   if (filters.payment_from) {
     conditions.push('TRIM(COALESCE(payment_time_ymd, \'\')) >= ?');
@@ -4261,38 +4330,13 @@ function hasRealCollaboration(row) {
 }
 
 function buildCollaboratedRows(filters = {}) {
-  const conditions = [
-    `TRIM(COALESCE(creator_username, '')) != ''`,
-    `TRIM(COALESCE(payment_time_ymd, '')) != ''`,
-    `CAST(SUBSTR(payment_time_ymd, 5, 2) AS INTEGER) BETWEEN 1 AND 12`,
-    `CAST(SUBSTR(payment_time_ymd, 7, 2) AS INTEGER) BETWEEN 1 AND 31`,
-  ];
-  const params = [];
+  let aggMap = buildAllianceOrderStatsByInfluencerKey();
   if (filters.influencer_id) {
-    const aliasValues = getInfluencerAliasDisplayValues(filters.influencer_id);
-    const clauses = aliasValues.map(() => 'creator_username LIKE ?');
-    conditions.push(`(${clauses.join(' OR ')})`);
-    aliasValues.forEach((value) => params.push(`%${value}%`));
+    const aliasKeys = new Set(
+      getInfluencerAliasDisplayValues(filters.influencer_id).map((value) => normalizeMatchKey(value))
+    );
+    aggMap = new Map([...aggMap.entries()].filter(([key]) => aliasKeys.has(key)));
   }
-
-  const aggRows = queryRows(
-    `
-    SELECT
-      creator_username,
-      COUNT(*) AS order_count,
-      COUNT(DISTINCT CASE WHEN TRIM(COALESCE(content_id, '')) != '' THEN content_id ELSE NULL END) AS video_count,
-      SUM(CASE WHEN is_refund = 1 THEN 1 ELSE 0 END) AS refund_count
-    FROM alliance_orders
-    WHERE ${conditions.join(' AND ')}
-    GROUP BY creator_username
-    `,
-    params
-  );
-
-  const aggMap = new Map();
-  aggRows.forEach((row) => {
-    aggMap.set(normalizeMatchKey(row.creator_username), row);
-  });
 
   const sampleOrderMaps = buildSampleOrderIndexMaps();
   const recordMap = getMergedRecordSummaryByInfluencer();
@@ -4498,10 +4542,10 @@ function aggregateAllianceOrderStatsAllTime(creatorNames) {
     SELECT
       COUNT(*) AS order_count,
       COUNT(DISTINCT CASE WHEN TRIM(COALESCE(content_id, '')) != '' THEN content_id ELSE NULL END) AS video_count,
-      SUM(CASE WHEN is_refund = 1 THEN 1 ELSE 0 END) AS refund_count
+      SUM(CASE WHEN ${allianceOrderIsRefundedSql()} THEN 1 ELSE 0 END) AS refund_count
     FROM alliance_orders
     WHERE creator_username IN (${placeholders})
-      AND TRIM(COALESCE(payment_time_ymd, '')) != ''
+      AND ${allianceOrderPaymentTimeValidConditions().join(' AND ')}
     `,
     creatorNames
   );
@@ -4522,10 +4566,10 @@ function aggregateAllianceOrderStats(creatorNames, dateFrom, dateTo) {
     SELECT
       COUNT(*) AS order_count,
       COUNT(DISTINCT CASE WHEN TRIM(COALESCE(content_id, '')) != '' THEN content_id ELSE NULL END) AS video_count,
-      SUM(CASE WHEN is_refund = 1 THEN 1 ELSE 0 END) AS refund_count
+      SUM(CASE WHEN ${allianceOrderIsRefundedSql()} THEN 1 ELSE 0 END) AS refund_count
     FROM alliance_orders
     WHERE creator_username IN (${placeholders})
-      AND TRIM(COALESCE(payment_time_ymd, '')) != ''
+      AND ${allianceOrderPaymentTimeValidConditions().join(' AND ')}
       AND payment_time_ymd >= ?
       AND payment_time_ymd <= ?
     `,
@@ -4913,7 +4957,7 @@ function getAssigneeStats(filters = {}) {
   rebuildAllianceOrderDerivedFields();
   queryRows(
     `
-    SELECT creator_username, content_id, is_refund, payment_time_ymd
+    SELECT creator_username, content_id, is_refund, full_refund, payment_time_ymd
     FROM alliance_orders
     WHERE TRIM(COALESCE(payment_time_ymd, '')) != ''
       AND payment_time_ymd >= ?
@@ -4934,7 +4978,7 @@ function getAssigneeStats(filters = {}) {
         }
         const agg = periodBucket.alliance.get(influencerKey);
         agg.orderCount += 1;
-        if (Number(order.is_refund) === 1) agg.refundCount += 1;
+        if (isAllianceOrderRefunded(order)) agg.refundCount += 1;
         const contentId = String(order.content_id || '').trim();
         if (contentId) agg.videos.add(contentId);
       });

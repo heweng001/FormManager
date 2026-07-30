@@ -24,6 +24,7 @@
     let urlSampleDateTo = '';
     let urlPaymentFrom = '';
     let urlPaymentTo = '';
+    let urlFullRefund = '';
 
     async function init() {
       await requireLogin();
@@ -120,6 +121,7 @@
       if (paymentTo) document.getElementById('filterPaymentTo').value = paymentTo;
       urlPaymentFrom = paymentFrom;
       urlPaymentTo = paymentTo;
+      urlFullRefund = params.get('full_refund') === '1' ? '1' : '';
     }
 
     function getBatchFilters() {
@@ -138,6 +140,7 @@
         sample_date_to: urlSampleDateTo,
         payment_from: document.getElementById('filterPaymentFrom').value.trim() || urlPaymentFrom,
         payment_to: document.getElementById('filterPaymentTo').value.trim() || urlPaymentTo,
+        full_refund: urlFullRefund,
         import_time: document.getElementById('filterImportTime').value.trim(),
         page: currentPage,
         pageSize: PAGE_SIZE,
