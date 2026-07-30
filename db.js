@@ -2836,19 +2836,14 @@ function normalizeYmdInput(value) {
 }
 
 function extractAllianceOrderFields(data) {
-  const content_id = readOrderFieldFromData(data, 'content_id', ['内容ID', '内容id', 'Content ID', 'content id']);
-  const creator_username = readOrderFieldFromData(data, 'creator_username', [
-    '达人id', '达人ID', '达人用户名', 'Creator Username', 'creator username',
-  ]);
-  const order_id = readOrderFieldFromData(data, 'order_id', [
-    'Main order ID', 'Platform order ID', '主订单 ID', '平台订单 ID',
-  ]) || String(data.unique_key ?? '').trim();
-  const payment_time_raw = readOrderFieldFromData(data, 'payment_time_raw', ['支付时间', 'Payment Time', 'payment time']);
+  const order_id = readOrderFieldFromData(data, 'order_id', ['订单id', '订单 ID', 'Order ID', 'unique_key']);
+  const content_id = readOrderFieldFromData(data, 'content_id', ['内容id', '内容 ID', 'Content ID']);
+  const creator_username = readOrderFieldFromData(data, 'creator_username', ['达人id', '达人 ID', 'Creator Username']);
+  const payment_time_raw = readOrderFieldFromData(data, 'payment_time_raw', ['支付时间', 'Payment Time']);
   const payment_time_ymd = parseCreatedTimeToYmd(payment_time_raw);
-  const return_or_refund = readOrderFieldFromData(data, 'full_return', ['已全部退货或全额退款', '已全部退货', '全额退款']);
-  const full_return = return_or_refund;
-  const full_refund = readOrderFieldFromData(data, 'full_refund', ['全额退款', 'Full Refund', 'full refund']);
-  const is_refund = isYesValue(return_or_refund) || isYesValue(full_refund) ? 1 : 0;
+  const full_refund = readOrderFieldFromData(data, 'full_refund', ['已全部退款', '全额退款']);
+  const full_return = full_refund;
+  const is_refund = isYesValue(full_refund) ? 1 : 0;
   return {
     content_id,
     creator_username,
@@ -2899,11 +2894,16 @@ function getLastAllianceOrderImport() {
 }
 
 function findAllianceOrderByUniqueKey(uniqueKey) {
-  return Promise.resolve(queryOne('SELECT id FROM alliance_orders WHERE unique_key = ?', [uniqueKey]));
+  const key = String(uniqueKey || '').trim();
+  if (!key) return Promise.resolve(null);
+  return Promise.resolve(
+    queryOne('SELECT id FROM alliance_orders WHERE unique_key = ? OR order_id = ? LIMIT 1', [key, key])
+  );
 }
 
 function insertAllianceOrder({ unique_key, data, imported_by, import_time }) {
   const fields = extractAllianceOrderFields(data);
+  const resolvedUniqueKey = unique_key || fields.order_id;
   const resolvedImportTime = import_time || formatBeijingDateTime();
   db.run(
     `INSERT INTO alliance_orders (
@@ -2911,7 +2911,7 @@ function insertAllianceOrder({ unique_key, data, imported_by, import_time }) {
       payment_time_raw, payment_time_ymd, full_return, full_refund, is_refund, imported_by, import_time
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      unique_key,
+      resolvedUniqueKey,
       JSON.stringify(data || {}),
       fields.content_id,
       fields.creator_username,
@@ -2927,6 +2927,36 @@ function insertAllianceOrder({ unique_key, data, imported_by, import_time }) {
   );
   saveDb();
   return Promise.resolve(db.exec('SELECT last_insert_rowid()')[0].values[0][0]);
+}
+
+function updateAllianceOrder(id, { unique_key, data, imported_by, import_time }) {
+  const fields = extractAllianceOrderFields(data);
+  const resolvedUniqueKey = unique_key || fields.order_id;
+  const resolvedImportTime = import_time || formatBeijingDateTime();
+  db.run(
+    `UPDATE alliance_orders SET
+      unique_key = ?, data_json = ?, content_id = ?, creator_username = ?, order_id = ?,
+      payment_time_raw = ?, payment_time_ymd = ?, full_return = ?, full_refund = ?, is_refund = ?,
+      imported_by = ?, import_time = ?
+     WHERE id = ?`,
+    [
+      resolvedUniqueKey,
+      JSON.stringify(data || {}),
+      fields.content_id,
+      fields.creator_username,
+      fields.order_id,
+      fields.payment_time_raw,
+      fields.payment_time_ymd,
+      fields.full_return,
+      fields.full_refund,
+      fields.is_refund,
+      imported_by || '',
+      resolvedImportTime,
+      id,
+    ]
+  );
+  saveDb();
+  return Promise.resolve(true);
 }
 
 function backfillAllianceOrderDates() {
@@ -5408,6 +5438,7 @@ module.exports = {
   getLastAllianceOrderImport,
   findAllianceOrderByUniqueKey,
   insertAllianceOrder,
+  updateAllianceOrder,
   getAllianceOrderById,
   getAllianceOrderPageNumber,
   getAllianceOrders,

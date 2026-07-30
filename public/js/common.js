@@ -1292,8 +1292,12 @@ function renderLastImportSummary(lastImport) {
   const by = escapeHtml(lastImport.imported_by || '-');
   const total = Number(lastImport.total) || 0;
   const inserted = Number(lastImport.inserted) || 0;
+  const updated = Number(lastImport.updated) || 0;
   const skipped = Number(lastImport.skipped) || 0;
-  return `<div class="erp-import-summary">最近导入：${escapeHtml(time)} · 导入人 ${by} · 共 ${total} 条，成功 ${inserted} 条，重复 ${skipped} 条</div>`;
+  let detail = `成功 ${inserted} 条`;
+  if (updated > 0) detail += `，覆盖 ${updated} 条`;
+  if (skipped > 0) detail += `，重复 ${skipped} 条`;
+  return `<div class="erp-import-summary">最近导入：${escapeHtml(time)} · 导入人 ${by} · 共 ${total} 条，${detail}</div>`;
 }
 
 function formatScrapeEmailResultMessage(data) {

@@ -84,6 +84,7 @@ const {
   getLastAllianceOrderImport,
   findAllianceOrderByUniqueKey,
   insertAllianceOrder,
+  updateAllianceOrder,
   getAllianceOrderById,
   getAllianceOrderPageNumber,
   getAllianceOrders,
@@ -340,7 +341,7 @@ function parseAllianceOrderFile(filePath) {
     .slice(1)
     .map((row) => {
       const data = buildAllianceOrderImportData(row);
-      const uniqueKey = toCellValue(data.unique_key) || toCellValue(data.order_id);
+      const uniqueKey = toCellValue(data.order_id);
       return { unique_key: uniqueKey, data };
     })
     .filter((item) => item.unique_key);
@@ -1654,14 +1655,13 @@ app.post('/api/alliance-orders/upload', requireAuth, upload.single('file'), asyn
   if (!req.file) return res.status(400).json({ success: false, message: '请上传文件' });
   const filePath = req.file.path;
   let inserted = 0;
-  let skipped = 0;
-  const duplicateKeys = [];
+  let updated = 0;
   try {
     const { rows } = parseAllianceOrderFile(filePath);
     if (!rows.length) {
       return res.status(400).json({
         success: false,
-        message: '未能从文件中解析到有效数据。请确认首列为唯一标识且数据从第 2 行开始。',
+        message: '未能从文件中解析到有效数据。请确认第 1 列为订单 id 且数据从第 2 行开始。',
       });
     }
 
@@ -1669,8 +1669,13 @@ app.post('/api/alliance-orders/upload', requireAuth, upload.single('file'), asyn
     for (const row of rows) {
       const existing = await findAllianceOrderByUniqueKey(row.unique_key);
       if (existing) {
-        skipped++;
-        duplicateKeys.push(row.unique_key);
+        await updateAllianceOrder(existing.id, {
+          unique_key: row.unique_key,
+          data: row.data,
+          imported_by: req.user.name,
+          import_time: batchImportTime,
+        });
+        updated++;
         continue;
       }
       await insertAllianceOrder({
@@ -1689,18 +1694,19 @@ app.post('/api/alliance-orders/upload', requireAuth, upload.single('file'), asyn
       imported_by: req.user.name,
       total: rows.length,
       inserted,
-      skipped,
+      updated,
+      skipped: 0,
     });
 
     res.json({
       success: true,
       inserted,
-      skipped,
-      duplicateKeys,
+      updated,
+      skipped: 0,
       total: rows.length,
       message:
-        duplicateKeys.length > 0
-          ? `导入完成：新增 ${inserted} 条，跳过重复 ${skipped} 条`
+        updated > 0
+          ? `导入完成：新增 ${inserted} 条，覆盖 ${updated} 条`
           : `导入完成：新增 ${inserted} 条`,
     });
   } catch (err) {

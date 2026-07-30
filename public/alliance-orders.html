@@ -33,7 +33,7 @@
         meta: '联盟订单导入与查询',
         content: `
           <div class="erp-page-header erp-page-header-compact">
-            <h1 class="erp-page-title erp-page-title-inline">联盟订单<span class="erp-page-desc-inline"> — 导入第 1、2、3、4、5、6、8、9、11、12、13、14、16、17、18、21、22、26、27、28、29 列，首列唯一</span></h1>
+            <h1 class="erp-page-title erp-page-title-inline">联盟订单<span class="erp-page-desc-inline"> — 导入第 1、2、4、5、6、8、9、11、12、14、16、21、27、28、29 列，订单 id 唯一且重复覆盖</span></h1>
           </div>
           <div id="lastImportBanner"></div>
           <div class="erp-card erp-card-compact" style="margin-bottom:8px;">
@@ -57,7 +57,9 @@
                   ${renderImportColumnGuideHtml(ALLIANCE_ORDER_COLUMNS, {
                     sourceColumns: ALLIANCE_ORDER_SOURCE_COLUMNS,
                     notes: [
-                      '首列（第 1 列）为唯一标识，重复记录将跳过；请使用 TikTok 原始导出表格，勿删列。',
+                      '列表表头固定如上，与 Excel 导出表头文字无关；第 1 行会被跳过。',
+                      '订单 id（第 1 列）为唯一标识：重复导入时将覆盖已有记录。',
+                      '请使用 TikTok 原始导出表格，勿删列。',
                     ],
                   })}
                   <input type="file" id="fileInput" accept="${IMPORT_FILE_ACCEPT}" style="display:none" />
@@ -270,13 +272,7 @@
         const res = await fetch('/api/alliance-orders/upload', { method: 'POST', body: formData, credentials: 'same-origin' });
         const data = await res.json();
         if (!res.ok) return alert(data.message || '导入失败');
-        let msg = data.message || `新增 ${data.inserted} 条，跳过重复 ${data.skipped} 条`;
-        if (data.duplicateKeys?.length) {
-          const preview = data.duplicateKeys.slice(0, 8).join('、');
-          const suffix = data.duplicateKeys.length > 8 ? ` 等 ${data.duplicateKeys.length} 项` : '';
-          msg += `\n\n重复的首列值：${preview}${suffix}`;
-        }
-        document.getElementById('importMessage').textContent = msg;
+        document.getElementById('importMessage').textContent = data.message || `新增 ${data.inserted || 0} 条，覆盖 ${data.updated || 0} 条`;
         document.getElementById('importModal').classList.remove('hidden');
       } catch {
         alert('导入失败');

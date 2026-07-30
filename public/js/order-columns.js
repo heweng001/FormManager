@@ -5,9 +5,27 @@
 const SAMPLE_ORDER_COLUMN_INDEXES = [0, 1, 2, 5, 28, 30, 31, 32, 38, 44];
 const SAMPLE_ORDER_SOURCE_COLUMNS = [1, 2, 3, 6, 29, 31, 32, 33, 39, 45];
 
-/** 联盟订单：导入第 1、2、3、4、5、6、8、9、11、12、13、14、16、17、18、21、22、26、27、28、29 列 */
-const ALLIANCE_ORDER_COLUMN_INDEXES = [0, 1, 2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 15, 16, 17, 20, 21, 25, 26, 27, 28];
-const ALLIANCE_ORDER_SOURCE_COLUMNS = [1, 2, 3, 4, 5, 6, 8, 9, 11, 12, 13, 14, 16, 17, 18, 21, 22, 26, 27, 28, 29];
+/** 联盟订单：导入第 1、2、4、5、6、8、9、11、12、14、16、21、27、28、29 列 */
+const ALLIANCE_ORDER_COLUMN_INDEXES = [0, 1, 3, 4, 5, 7, 8, 10, 11, 13, 15, 20, 26, 27, 28];
+const ALLIANCE_ORDER_SOURCE_COLUMNS = [1, 2, 4, 5, 6, 8, 9, 11, 12, 14, 16, 21, 27, 28, 29];
+
+const ALLIANCE_ORDER_COLUMNS = [
+  { key: 'order_id', label: '订单id', legacyAliases: ['订单id', '订单 ID', 'Order ID', 'order id', 'unique_key'] },
+  { key: 'product_id', label: '商品id', legacyAliases: ['商品id', '商品 ID', 'Product ID', 'product_id'] },
+  { key: 'sku_id', label: 'skuID', legacyAliases: ['SKU ID', 'Sku ID', 'skuid', 'SKU', 'sku_id'] },
+  { key: 'product_price', label: '商品价格', legacyAliases: ['商品价格', 'Product Price', 'product_price'] },
+  { key: 'order_amount', label: '支付金额', legacyAliases: ['支付金额', '订单金额', 'Order Amount', 'order_amount'] },
+  { key: 'quantity', label: '下单件数', legacyAliases: ['下单件数', '数量', 'Quantity', 'quantity'] },
+  { key: 'full_refund', label: '已全部退款', legacyAliases: ['已全部退款', '全额退款', 'full_refund'] },
+  { key: 'order_status', label: '订单状态', legacyAliases: ['订单状态', 'Order Status', 'order_status'] },
+  { key: 'creator_username', label: '达人id', legacyAliases: ['达人id', '达人 ID', 'Creator Username', 'creator_username'] },
+  { key: 'content_id', label: '内容id', legacyAliases: ['内容id', '内容 ID', 'Content ID', 'content_id'] },
+  { key: 'commission_rate', label: '标准佣金率', legacyAliases: ['标准佣金率', '佣金率', 'Commission Rate', 'commission_rate'] },
+  { key: 'ad_commission_rate', label: '广告佣金率', legacyAliases: ['广告佣金率', 'ad_commission_rate'] },
+  { key: 'payment_time_raw', label: '支付时间', legacyAliases: ['支付时间', 'Payment Time', 'payment_time_raw'] },
+  { key: 'delivery_time_raw', label: '送达时间', legacyAliases: ['送达时间', 'delivery_time_raw'] },
+  { key: 'settlement_time_raw', label: '佣金结算时间', legacyAliases: ['佣金结算时间', '结算时间', 'settlement_time_raw'] },
+];
 
 const SAMPLE_ORDER_COLUMNS = [
   { key: 'unique_key', label: '唯一标识', legacyAliases: ['唯一标识', 'Sample Order ID', 'Order ID', '订单 ID'] },
@@ -20,30 +38,6 @@ const SAMPLE_ORDER_COLUMNS = [
   { key: 'status', label: '状态', legacyAliases: ['Status', 'status', '订单状态'] },
   { key: 'quantity', label: '数量', legacyAliases: ['Quantity', 'quantity', '数量'] },
   { key: 'remark', label: '备注', legacyAliases: ['Remark', 'remark', '备注'] },
-];
-
-const ALLIANCE_ORDER_COLUMNS = [
-  { key: 'unique_key', label: '唯一标识', legacyAliases: ['唯一标识', '联盟订单号', 'Order ID', '订单 ID'] },
-  { key: 'content_id', label: '内容 id', legacyAliases: ['内容ID', '内容id', 'Content ID', 'content id'] },
-  { key: 'creator_username', label: '达人 id', legacyAliases: ['达人id', '达人ID', 'Creator Username', 'creator username'] },
-  { key: 'product_name', label: '商品名称', legacyAliases: ['Product Name', 'product name', '商品名称'] },
-  { key: 'product_id', label: '商品 id', legacyAliases: ['Product ID', 'product id', '商品 ID', '商品id'] },
-  { key: 'sku_id', label: 'SKU id', legacyAliases: ['SKU ID', 'Sku ID', 'skuid', 'SKU'] },
-  { key: 'payment_time_raw', label: '支付时间', legacyAliases: ['支付时间', 'Payment Time', 'payment time'] },
-  { key: 'order_status', label: '订单状态', legacyAliases: ['Order Status', 'order status', '订单状态'] },
-  { key: 'quantity', label: '数量', legacyAliases: ['Quantity', 'quantity', '数量'] },
-  { key: 'product_price', label: '商品价格', legacyAliases: ['Product Price', 'product price', '商品价格', '单价'] },
-  { key: 'order_amount', label: '订单金额', legacyAliases: ['Order Amount', 'order amount', '订单金额', '金额'] },
-  { key: 'commission_rate', label: '佣金率', legacyAliases: ['Commission Rate', 'commission rate', '佣金率'] },
-  { key: 'commission', label: '佣金', legacyAliases: ['Commission', 'commission', '佣金'] },
-  { key: 'currency', label: '币种', legacyAliases: ['Currency', 'currency', '币种'] },
-  { key: 'promotion_type', label: '推广类型', legacyAliases: ['Promotion Type', 'promotion type', '推广类型'] },
-  { key: 'order_id', label: '订单 id', legacyAliases: ['订单 ID', '订单id', 'Order ID', 'order id'] },
-  { key: 'video_id', label: '视频 id', legacyAliases: ['Video ID', 'video id', '视频 ID'] },
-  { key: 'full_return', label: '已全部退货或全额退款', legacyAliases: ['已全部退货或全额退款', '已全部退货'] },
-  { key: 'refund_amount', label: '退款金额', legacyAliases: ['Refund Amount', 'refund amount', '退款金额'] },
-  { key: 'full_refund', label: '全额退款', legacyAliases: ['全额退款', 'Full Refund', 'full refund'] },
-  { key: 'settlement_status', label: '结算状态', legacyAliases: ['Settlement Status', 'settlement status', '结算状态'] },
 ];
 
 const RECORD_IMPORT_COLUMNS = [
