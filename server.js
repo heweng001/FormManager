@@ -11,9 +11,11 @@ const XLSX = require('xlsx');
 const {
   buildSampleOrderImportData,
   buildAllianceOrderImportData,
+  buildInfluencerVideoImportData,
   buildRecordImportData,
   SAMPLE_ORDER_COLUMNS,
   ALLIANCE_ORDER_COLUMNS,
+  INFLUENCER_VIDEO_COLUMNS,
   RECORD_IMPORT_COLUMNS,
 } = require('./public/js/order-columns.js');
 const {
@@ -85,6 +87,11 @@ const {
   getAllianceOrderImportTimeOptions,
   getAllianceOrderIdsByFilters,
   batchDeleteAllianceOrders,
+  importInfluencerVideosBatch,
+  getInfluencerVideos,
+  getInfluencerVideoImportTimeOptions,
+  getInfluencerVideoIdsByFilters,
+  batchDeleteInfluencerVideos,
   getCollaboratedStats,
   getCollaboratedRowsForExport,
   getCollaboratedMonthlyStats,
@@ -155,6 +162,23 @@ const ALLOWED_IMPORT_EXTENSIONS = new Set(['.xlsx', '.xls', '.csv']);
 function isAllowedImportExtension(filename) {
   return ALLOWED_IMPORT_EXTENSIONS.has(path.extname(filename).toLowerCase());
 }
+
+function isAllowedXlsxExtension(filename) {
+  return path.extname(filename).toLowerCase() === '.xlsx';
+}
+
+const xlsxUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadsDir),
+    filename: (req, file, cb) => {
+      cb(null, Date.now() + '-' + Math.round(Math.random() * 1e9) + path.extname(file.originalname));
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    cb(null, isAllowedXlsxExtension(file.originalname));
+  },
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 
 const wikiImageUpload = multer({
   storage: multer.diskStorage({
@@ -241,6 +265,10 @@ app.use((req, res, next) => {
 
 app.get('/influencers-collaborated.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'influencers-collaborated.html'));
+});
+
+app.get('/influencer-videos.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'influencer-videos.html'));
 });
 
 app.get('/email-history.html', (req, res) => {
@@ -350,6 +378,23 @@ function parseAllianceOrderFile(filePath) {
     .map((row) => {
       const data = buildAllianceOrderImportData(row);
       const uniqueKey = toCellValue(data.order_id);
+      return { unique_key: uniqueKey, data };
+    })
+    .filter((item) => item.unique_key);
+  return { rows: parsedRows };
+}
+
+function parseInfluencerVideoFile(filePath) {
+  if (!isAllowedXlsxExtension(filePath)) {
+    throw new Error('仅支持 .xlsx 格式');
+  }
+  const rows = readSpreadsheetRows(filePath);
+  if (rows.length < 3) return { rows: [] };
+  const parsedRows = rows
+    .slice(2)
+    .map((row) => {
+      const data = buildInfluencerVideoImportData(row);
+      const uniqueKey = toCellValue(data.content_id);
       return { unique_key: uniqueKey, data };
     })
     .filter((item) => item.unique_key);
@@ -1820,6 +1865,123 @@ app.post('/api/alliance-orders/batch-delete', requireAuth, async (req, res) => {
     res.json({ success: true, deleted });
   } catch (err) {
     console.error('联盟订单批量删除失败:', err);
+    res.status(500).json({ success: false, message: '批量删除失败' });
+  }
+});
+
+app.post('/api/influencer-videos/upload', requireAuth, xlsxUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, message: '请上传 .xlsx 文件' });
+  const filePath = req.file.path;
+  let inserted = 0;
+  let skipped = 0;
+  const duplicateKeys = [];
+  try {
+    const { rows } = parseInfluencerVideoFile(filePath);
+    if (!rows.length) {
+      return res.status(400).json({
+        success: false,
+        message: '未能从文件中解析到有效数据。请确认内容为 .xlsx，忽略前 2 行后从第 3 行起有数据，且第 2 列（内容 id）不为空。',
+      });
+    }
+
+    const batchResult = await importInfluencerVideosBatch({
+      rows,
+      imported_by: req.user.name,
+      import_time: formatBeijingDateTime(new Date()),
+    });
+    inserted = batchResult.inserted;
+    skipped = batchResult.skipped;
+    duplicateKeys.push(...batchResult.duplicateKeys);
+
+    res.json({
+      success: true,
+      inserted,
+      skipped,
+      duplicateKeys,
+      total: rows.length,
+      message:
+        duplicateKeys.length > 0
+          ? `导入完成：新增 ${inserted} 条，跳过重复 ${skipped} 条`
+          : `导入完成：新增 ${inserted} 条`,
+    });
+  } catch (err) {
+    console.error('达人视频导入失败:', err);
+    res.status(500).json({ success: false, message: err.message || '达人视频导入失败' });
+  } finally {
+    fs.unlink(filePath, () => {});
+  }
+});
+
+app.get('/api/influencer-videos', requireAuth, async (req, res) => {
+  try {
+    const filters = {
+      content_id: toCellValue(req.query.content_id),
+      creator_username: toCellValue(req.query.creator_username),
+      publish_date_from: toCellValue(req.query.publish_date_from),
+      publish_date_to: toCellValue(req.query.publish_date_to),
+      import_time: toCellValue(req.query.import_time),
+      page: Math.max(1, parseInt(req.query.page, 10) || 1),
+      pageSize: Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50)),
+    };
+    const { rows, total, page, pageSize, columns } = await getInfluencerVideos(filters);
+    res.json({
+      success: true,
+      data: rows,
+      columns,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: '获取达人视频失败' });
+  }
+});
+
+app.get('/api/influencer-videos/filter-options', requireAuth, async (req, res) => {
+  try {
+    const filters = {
+      content_id: toCellValue(req.query.content_id),
+      creator_username: toCellValue(req.query.creator_username),
+      publish_date_from: toCellValue(req.query.publish_date_from),
+      publish_date_to: toCellValue(req.query.publish_date_to),
+    };
+    const options = await getInfluencerVideoImportTimeOptions(filters);
+    res.json({ success: true, ...options });
+  } catch (err) {
+    res.status(500).json({ success: false, message: '获取筛选项失败' });
+  }
+});
+
+app.post('/api/influencer-videos/batch-delete', requireAuth, async (req, res) => {
+  const scope = req.body?.scope === 'all' ? 'all' : 'page';
+  const videoIds = Array.isArray(req.body?.video_ids)
+    ? req.body.video_ids.map((id) => Number(id)).filter(Boolean)
+    : [];
+
+  try {
+    let ids = [];
+    if (scope === 'all') {
+      const filters = {
+        content_id: toCellValue(req.body?.filters?.content_id),
+        creator_username: toCellValue(req.body?.filters?.creator_username),
+        publish_date_from: toCellValue(req.body?.filters?.publish_date_from),
+        publish_date_to: toCellValue(req.body?.filters?.publish_date_to),
+        import_time: toCellValue(req.body?.filters?.import_time),
+      };
+      ids = await getInfluencerVideoIdsByFilters(filters);
+    } else {
+      ids = videoIds;
+    }
+
+    if (!ids.length) {
+      return res.status(400).json({ success: false, message: '没有可删除的记录' });
+    }
+
+    const deleted = await batchDeleteInfluencerVideos(ids);
+    res.json({ success: true, deleted });
+  } catch (err) {
+    console.error('达人视频批量删除失败:', err);
     res.status(500).json({ success: false, message: '批量删除失败' });
   }
 });

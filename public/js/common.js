@@ -136,6 +136,7 @@ const MORE_LINKS = [
 const DATA_IMPORT_LINKS = [
   { label: '样品订单', url: '/sample-orders.html', key: 'sample-orders' },
   { label: '联盟订单', url: '/alliance-orders.html', key: 'alliance-orders' },
+  { label: '达人视频', url: '/influencer-videos.html', key: 'influencer-videos' },
 ];
 
 const INFLUENCER_LINKS = [
@@ -438,6 +439,13 @@ function renderOrderTableCellHtml(row, column, skuModelMap = {}) {
     return `<td class="cell-import-time" title="${escapeAttr(text)}">${escapeHtml(text)}</td>`;
   }
   const raw = typeof readOrderCellValue === 'function' ? readOrderCellValue(row, column) : '';
+  if (column.key === 'video_url') {
+    const url = String(raw || '').trim();
+    if (url) {
+      return `<td class="cell-truncate"><a href="${escapeAttr(url)}" class="erp-link-external" target="_blank" rel="noopener noreferrer" title="${escapeAttr(url)}">${escapeHtml(url)}</a></td>`;
+    }
+    return `<td class="cell-truncate">-</td>`;
+  }
   const skuDisplay = isSkuIdColumn(column) ? resolveSkuModelDisplay(raw, row, column, skuModelMap) : null;
   if (skuDisplay) {
     const title = `${skuDisplay.model}（SKU ${skuDisplay.skuId}）`;
@@ -1027,7 +1035,8 @@ const TABLE_SELECT_ALL_HEADER = `
     </div>
   </th>`;
 
-function createBatchRowSelection() {
+function createBatchRowSelection(options = {}) {
+  const deleteIdKey = options.deleteIdKey || 'order_ids';
   let selectedIds = new Set();
   let allResultsSelected = false;
   let lastLoadedRows = [];
@@ -1194,7 +1203,7 @@ function createBatchRowSelection() {
   function buildDeletePayload(getBatchFilters) {
     return {
       scope: allResultsSelected ? 'all' : 'page',
-      order_ids: allResultsSelected ? [] : [...selectedIds],
+      [deleteIdKey]: allResultsSelected ? [] : [...selectedIds],
       filters: typeof getBatchFilters === 'function' ? getBatchFilters() : {},
     };
   }

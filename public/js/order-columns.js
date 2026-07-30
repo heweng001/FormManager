@@ -28,6 +28,16 @@ const ALLIANCE_ORDER_COLUMNS = [
   { key: 'settlement_time_raw', label: '佣金结算时间', legacyAliases: ['佣金结算时间', '结算时间', 'settlement_time_raw'] },
 ];
 
+/** 达人视频：忽略前 2 行，从第 3 行起导入第 1–6 列 */
+const INFLUENCER_VIDEO_COLUMNS = [
+  { key: 'video_title', label: '视频标题' },
+  { key: 'content_id', label: '内容id', legacyAliases: ['内容id', '内容 ID', 'Content ID', 'content_id'] },
+  { key: 'publish_date_raw', label: '发布日期', legacyAliases: ['发布日期', 'Publish Date', 'publish_date'] },
+  { key: 'video_url', label: '视频链接', legacyAliases: ['视频链接', 'Video URL', 'video_url', '链接'] },
+  { key: 'creator_username', label: '达人id', legacyAliases: ['达人id', '达人 ID', 'Creator Username', 'creator_username'] },
+  { key: 'product_id', label: '商品id', legacyAliases: ['商品id', '商品 ID', 'Product ID', 'product_id'] },
+];
+
 const SAMPLE_ORDER_COLUMNS = [
   { key: 'unique_key', label: '唯一标识', legacyAliases: ['唯一标识', 'Sample Order ID', 'Order ID', '订单 ID'] },
   { key: 'order_id', label: '订单 id', legacyAliases: ['Order ID', 'order id', 'OrderID', '订单 ID', '订单id'] },
@@ -115,6 +125,10 @@ function buildAllianceOrderImportData(row) {
   return buildImportedOrderData(row, ALLIANCE_ORDER_COLUMNS, ALLIANCE_ORDER_COLUMN_INDEXES);
 }
 
+function buildInfluencerVideoImportData(row) {
+  return buildImportedOrderData(row, INFLUENCER_VIDEO_COLUMNS);
+}
+
 function buildRecordImportData(row) {
   return buildImportedOrderData(row, RECORD_IMPORT_COLUMNS);
 }
@@ -128,6 +142,7 @@ if (typeof module !== 'undefined' && module.exports) {
     ALLIANCE_ORDER_FILE_COLUMN_COUNT,
     SAMPLE_ORDER_COLUMNS,
     ALLIANCE_ORDER_COLUMNS,
+    INFLUENCER_VIDEO_COLUMNS,
     RECORD_IMPORT_COLUMNS,
     normalizeOrderFieldKey,
     pickOrderDataField,
@@ -136,6 +151,7 @@ if (typeof module !== 'undefined' && module.exports) {
     buildImportedOrderData,
     buildSampleOrderImportData,
     buildAllianceOrderImportData,
+    buildInfluencerVideoImportData,
     buildRecordImportData,
   };
 }
@@ -148,6 +164,7 @@ if (typeof window !== 'undefined') {
   window.ALLIANCE_ORDER_FILE_COLUMN_COUNT = ALLIANCE_ORDER_FILE_COLUMN_COUNT;
   window.SAMPLE_ORDER_COLUMNS = SAMPLE_ORDER_COLUMNS;
   window.ALLIANCE_ORDER_COLUMNS = ALLIANCE_ORDER_COLUMNS;
+  window.INFLUENCER_VIDEO_COLUMNS = INFLUENCER_VIDEO_COLUMNS;
   window.RECORD_IMPORT_COLUMNS = RECORD_IMPORT_COLUMNS;
   window.readOrderCellValue = readOrderCellValue;
 }

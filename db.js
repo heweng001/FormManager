@@ -447,7 +447,7 @@ function migrateImportBatchTimeToBeijing() {
 function migrateOrderImportTimeToBeijing() {
   ensureAppMetaTable();
   if (getAppMeta('order_import_time_beijing_v1') === '1') return;
-  ['sample_orders', 'alliance_orders'].forEach((table) => {
+  ['sample_orders', 'alliance_orders', 'influencer_videos'].forEach((table) => {
     queryRows(
       `SELECT id, import_time FROM ${table}
        WHERE import_time IS NOT NULL AND TRIM(import_time) != ''
@@ -842,6 +842,23 @@ async function initDatabase() {
       full_return TEXT,
       full_refund TEXT,
       is_refund INTEGER DEFAULT 0,
+      imported_by TEXT,
+      import_time DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS influencer_videos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      unique_key TEXT NOT NULL UNIQUE,
+      data_json TEXT NOT NULL,
+      video_title TEXT,
+      content_id TEXT,
+      publish_date_raw TEXT,
+      publish_date_ymd TEXT,
+      video_url TEXT,
+      creator_username TEXT,
+      product_id TEXT,
       imported_by TEXT,
       import_time DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -2091,6 +2108,7 @@ function updateRecordFields(id, fields, meta = {}) {
 const {
   SAMPLE_ORDER_COLUMNS,
   ALLIANCE_ORDER_COLUMNS,
+  INFLUENCER_VIDEO_COLUMNS,
   RECORD_IMPORT_COLUMNS,
   readOrderFieldFromData,
   buildImportedOrderData,
@@ -3703,6 +3721,181 @@ function batchDeleteAllianceOrders(ids) {
   if (!uniqueIds.length) return Promise.resolve(0);
   const placeholders = uniqueIds.map(() => '?').join(', ');
   db.run(`DELETE FROM alliance_orders WHERE id IN (${placeholders})`, uniqueIds);
+  saveDb();
+  return Promise.resolve(uniqueIds.length);
+}
+
+function extractInfluencerVideoFields(data) {
+  const video_title = readOrderFieldFromData(data, 'video_title', ['视频标题', 'Video Title']);
+  const content_id = readOrderFieldFromData(data, 'content_id', ['内容id', '内容 ID', 'Content ID']);
+  const publish_date_raw = readOrderFieldFromData(data, 'publish_date_raw', ['发布日期', 'Publish Date']);
+  const video_url = readOrderFieldFromData(data, 'video_url', ['视频链接', 'Video URL', '链接']);
+  const creator_username = readOrderFieldFromData(data, 'creator_username', ['达人id', '达人 ID', 'Creator Username']);
+  const product_id = readOrderFieldFromData(data, 'product_id', ['商品id', '商品 ID', 'Product ID']);
+  const publish_date_ymd = parseCreatedTimeToYmd(publish_date_raw);
+  return {
+    video_title,
+    content_id,
+    publish_date_raw,
+    publish_date_ymd,
+    video_url,
+    creator_username,
+    product_id,
+  };
+}
+
+function findInfluencerVideoByUniqueKey(uniqueKey) {
+  return Promise.resolve(queryOne('SELECT id FROM influencer_videos WHERE unique_key = ?', [uniqueKey]));
+}
+
+function insertInfluencerVideo({ unique_key, data, imported_by, import_time }, options = {}) {
+  const fields = extractInfluencerVideoFields(data);
+  const resolvedUniqueKey = unique_key || fields.content_id;
+  const resolvedImportTime = import_time || formatBeijingDateTime();
+  db.run(
+    `INSERT INTO influencer_videos (
+      unique_key, data_json, video_title, content_id, publish_date_raw, publish_date_ymd,
+      video_url, creator_username, product_id, imported_by, import_time
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      resolvedUniqueKey,
+      JSON.stringify(data || {}),
+      fields.video_title,
+      fields.content_id,
+      fields.publish_date_raw,
+      fields.publish_date_ymd,
+      fields.video_url,
+      fields.creator_username,
+      fields.product_id,
+      imported_by || '',
+      resolvedImportTime,
+    ]
+  );
+  if (!options.deferSave) saveDb();
+  return Promise.resolve(getLastInsertRowId());
+}
+
+function importInfluencerVideosBatch({ rows, imported_by, import_time }) {
+  let inserted = 0;
+  let skipped = 0;
+  const duplicateKeys = [];
+  const batchImportTime = import_time || formatBeijingDateTime();
+
+  for (const row of rows) {
+    const existing = queryOne('SELECT id FROM influencer_videos WHERE unique_key = ?', [row.unique_key]);
+    if (existing) {
+      skipped++;
+      duplicateKeys.push(row.unique_key);
+      continue;
+    }
+    insertInfluencerVideo(
+      {
+        unique_key: row.unique_key,
+        data: row.data,
+        imported_by,
+        import_time: batchImportTime,
+      },
+      { deferSave: true }
+    );
+    inserted++;
+  }
+
+  saveDb();
+  return Promise.resolve({ inserted, skipped, duplicateKeys, import_time: batchImportTime });
+}
+
+function buildInfluencerVideoWhere(filters = {}) {
+  const conditions = [];
+  const params = [];
+  if (filters.content_id) {
+    conditions.push('content_id LIKE ?');
+    params.push(`%${filters.content_id}%`);
+  }
+  if (filters.creator_username) {
+    const keyword = String(filters.creator_username).trim();
+    const aliasValues = getInfluencerAliasDisplayValues(keyword);
+    if (aliasValues.length > 1 || resolveCanonicalInfluencerId(keyword) !== keyword) {
+      const clauses = aliasValues.map(() => 'creator_username LIKE ?');
+      conditions.push(`(${clauses.join(' OR ')})`);
+      aliasValues.forEach((value) => params.push(`%${value}%`));
+    } else {
+      conditions.push('creator_username LIKE ?');
+      params.push(`%${keyword}%`);
+    }
+  }
+  if (filters.publish_date_from) {
+    conditions.push('TRIM(COALESCE(publish_date_ymd, \'\')) >= ?');
+    params.push(filters.publish_date_from);
+  }
+  if (filters.publish_date_to) {
+    conditions.push('TRIM(COALESCE(publish_date_ymd, \'\')) <= ?');
+    params.push(filters.publish_date_to);
+  }
+  if (filters.import_time) {
+    conditions.push('import_time = ?');
+    params.push(filters.import_time);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  return { where, params };
+}
+
+function getInfluencerVideos(filters = {}) {
+  const { where, params } = buildInfluencerVideoWhere(filters);
+  const page = Math.max(1, parseInt(filters.page, 10) || 1);
+  const pageSize = Math.min(200, Math.max(1, parseInt(filters.pageSize, 10) || 50));
+  const offset = (page - 1) * pageSize;
+  const total = queryOne(`SELECT COUNT(*) AS total FROM influencer_videos ${where}`, params)?.total || 0;
+  const rows = queryRows(
+    `SELECT id, unique_key, data_json, video_title, content_id, publish_date_raw, publish_date_ymd,
+            video_url, creator_username, product_id, imported_by, import_time
+     FROM influencer_videos ${where}
+     ORDER BY id DESC
+     LIMIT ? OFFSET ?`,
+    [...params, pageSize, offset]
+  ).map((row) => {
+    let data = {};
+    try {
+      data = JSON.parse(row.data_json || '{}');
+    } catch {
+      data = {};
+    }
+    return { ...row, data };
+  });
+  return Promise.resolve({ rows, total, page, pageSize, columns: INFLUENCER_VIDEO_COLUMNS });
+}
+
+function getInfluencerVideoImportTimeOptions(filters = {}) {
+  const { where, params } = buildInfluencerVideoWhere({ ...filters, import_time: undefined });
+  const wherePrefix = where ? `${where} AND` : 'WHERE';
+  const rows = queryRows(
+    `
+    SELECT import_time, COUNT(*) AS cnt
+    FROM influencer_videos
+    ${wherePrefix} import_time IS NOT NULL AND TRIM(import_time) != ''
+    GROUP BY import_time
+    ORDER BY import_time DESC
+    `,
+    params
+  );
+  return Promise.resolve({
+    import_times: rows.map((row) => ({
+      value: row.import_time,
+      label: `${row.import_time}（${row.cnt} 条）`,
+    })),
+  });
+}
+
+function getInfluencerVideoIdsByFilters(filters = {}) {
+  const { where, params } = buildInfluencerVideoWhere(filters);
+  const rows = queryRows(`SELECT id FROM influencer_videos ${where}`, params);
+  return Promise.resolve(rows.map((row) => row.id));
+}
+
+function batchDeleteInfluencerVideos(ids) {
+  const uniqueIds = [...new Set(ids.map((id) => Number(id)).filter(Boolean))];
+  if (!uniqueIds.length) return Promise.resolve(0);
+  const placeholders = uniqueIds.map(() => '?').join(', ');
+  db.run(`DELETE FROM influencer_videos WHERE id IN (${placeholders})`, uniqueIds);
   saveDb();
   return Promise.resolve(uniqueIds.length);
 }
@@ -5591,6 +5784,12 @@ module.exports = {
   getAllianceOrderImportTimeOptions,
   getAllianceOrderIdsByFilters,
   batchDeleteAllianceOrders,
+  importInfluencerVideosBatch,
+  getInfluencerVideos,
+  getInfluencerVideoImportTimeOptions,
+  getInfluencerVideoIdsByFilters,
+  batchDeleteInfluencerVideos,
+  INFLUENCER_VIDEO_COLUMNS,
   getCollaboratedStats,
   getCollaboratedRowsForExport,
   getCollaboratedMonthlyStats,
