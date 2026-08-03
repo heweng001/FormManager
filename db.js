@@ -904,6 +904,7 @@ async function initDatabase() {
   migrateRecordsMeta();
   migrateResyncSampleDatesPerSku();
   migrateReconcileSampleOrderYmdFromRaw();
+  migrateReconcileSampleOrderYmdFromRawV2();
   migrateInfluencerTagsToProfile();
   migrateStaffMailSettings();
   migrateEmailSendLogs();
@@ -2171,6 +2172,15 @@ function migrateReconcileSampleOrderYmdFromRaw() {
   saveDb();
 }
 
+function migrateReconcileSampleOrderYmdFromRawV2() {
+  ensureAppMetaTable();
+  if (getAppMeta('sample_order_ymd_reconcile_v2') === '1') return;
+  backfillSampleOrderYmdFromRaw();
+  syncSampleDatesToRecords({ deferSave: true });
+  setAppMeta('sample_order_ymd_reconcile_v2', '1');
+  saveDb();
+}
+
 function migrateInfluencerTagsToProfile() {
   ensureAppMetaTable();
   if (getAppMeta('influencer_tags_profile_only_v1') === '1') return;
@@ -2623,7 +2633,7 @@ function isValidYmd(ymd) {
   return month >= 1 && month <= 12 && day >= 1 && day <= 31;
 }
 
-function parseSlashDateToYmd(parts) {
+function parseSlashDateToYmd(parts, preferMonthFirst = true) {
   const a = Number(parts[0]);
   const b = Number(parts[1]);
   const y = String(parts[2]);
@@ -2633,6 +2643,9 @@ function parseSlashDateToYmd(parts) {
     day = a;
     month = b;
   } else if (b > 12) {
+    month = a;
+    day = b;
+  } else if (preferMonthFirst) {
     month = a;
     day = b;
   } else {
@@ -2656,9 +2669,13 @@ function parseCreatedTimeToYmd(value) {
     const ymd = `${y}${m}${d}`;
     return isValidYmd(ymd) ? ymd : '';
   }
+  if (/\b(AM|PM)\b/i.test(text)) {
+    const date = new Date(text);
+    if (!Number.isNaN(date.getTime())) return formatYmdFromDate(date);
+  }
   if (/^\d{1,2}[./-]\d{1,2}[./-]\d{4}/.test(text)) {
     const parts = text.split(/[ T]/)[0].split(/[-/.]/);
-    return parseSlashDateToYmd(parts);
+    return parseSlashDateToYmd(parts, true);
   }
   const serial = Number(text);
   if (!Number.isNaN(serial) && serial > 30000 && serial < 100000) {
