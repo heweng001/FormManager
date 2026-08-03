@@ -54,11 +54,17 @@ function renderImportColumnGuideHtml(columns, options = {}) {
       .join('');
   }
 
-  const intro = fileColumnCount && sourceColumns.length
-    ? `系统<strong>忽略第 1 行表头</strong>，从<strong>第 2 行</strong>起读取数据。请使用 TikTok 原始导出文件（共 ${fileColCount} 列，勿删列）；下表列出全部列，标记为「是」的 ${importCount} 列会被导入：`
-    : sourceColumns.length
-      ? '系统<strong>忽略第 1 行表头</strong>，从<strong>第 2 行</strong>起读取数据。请使用 TikTok 原始导出文件（勿删列）；仅读取下表「Excel 列号」所示列，其余列忽略：'
-      : '系统<strong>忽略首行</strong>（可保留平台表头）。从<strong>第 2 行</strong>起为数据；文件列须<strong>从左到右</strong>与下表一致：';
+  const intro =
+    options.introHtml ||
+    (Number(options.skipHeaderRows) > 0 && Number(options.dataStartRow) > 0
+      ? sourceColumns.length
+        ? `系统<strong>忽略表格前 ${Number(options.skipHeaderRows)} 行</strong>，从<strong>第 ${Number(options.dataStartRow)} 行</strong>起读取数据；仅导入下表「Excel 列号」所示列，其余列忽略：`
+        : `系统<strong>忽略表格前 ${Number(options.skipHeaderRows)} 行</strong>，从<strong>第 ${Number(options.dataStartRow)} 行</strong>起读取数据；文件列须<strong>从左到右</strong>与下表一致：`
+      : fileColumnCount && sourceColumns.length
+        ? `系统<strong>忽略第 1 行表头</strong>，从<strong>第 2 行</strong>起读取数据。请使用 TikTok 原始导出文件（共 ${fileColCount} 列，勿删列）；下表列出全部列，标记为「是」的 ${importCount} 列会被导入：`
+        : sourceColumns.length
+          ? '系统<strong>忽略第 1 行表头</strong>，从<strong>第 2 行</strong>起读取数据。请使用 TikTok 原始导出文件（勿删列）；仅读取下表「Excel 列号」所示列，其余列忽略：'
+          : '系统<strong>忽略首行</strong>（可保留平台表头）。从<strong>第 2 行</strong>起为数据；文件列须<strong>从左到右</strong>与下表一致：');
   return `
     <div class="erp-import-column-guide">
       <p class="erp-import-column-guide-title">${escapeHtml(title)}</p>
@@ -445,6 +451,10 @@ function renderOrderTableCellHtml(row, column, skuModelMap = {}) {
       return `<td class="cell-truncate"><a href="${escapeAttr(url)}" class="erp-link-external" target="_blank" rel="noopener noreferrer" title="${escapeAttr(url)}">${escapeHtml(url)}</a></td>`;
     }
     return `<td class="cell-truncate">-</td>`;
+  }
+  if (column.key === 'created_time_raw' || column.key === 'payment_time_raw' || column.key === 'received_time_raw') {
+    const text = raw ? formatDateTime(raw) || String(raw) : '-';
+    return `<td class="cell-truncate" title="${escapeAttr(raw)}">${escapeHtml(text)}</td>`;
   }
   const skuDisplay = isSkuIdColumn(column) ? resolveSkuModelDisplay(raw, row, column, skuModelMap) : null;
   if (skuDisplay) {

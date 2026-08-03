@@ -202,7 +202,7 @@
         meta: '达人视频导入与查询',
         content: `
           <div class="erp-page-header erp-page-header-compact">
-            <h1 class="erp-page-title erp-page-title-inline">达人视频<span class="erp-page-desc-inline"> — 仅支持 .xlsx；忽略前 2 行，从第 3 行起导入第 1–6 列</span></h1>
+            <h1 class="erp-page-title erp-page-title-inline">达人视频<span class="erp-page-desc-inline"> — 仅支持 .xlsx；忽略前 2 行，从第 3 行起导入第 1–6 列；内容 id（第 2 列）唯一</span></h1>
           </div>
           <div class="erp-card erp-card-compact" style="margin-bottom:8px;">
             <div class="erp-card-body erp-card-body-compact">
@@ -223,10 +223,11 @@
                   <p class="erp-upload-title">拖拽或点击上传 .xlsx 文件</p>
                   ${renderImportColumnGuideHtml(INFLUENCER_VIDEO_COLUMNS, {
                     hideFieldKeys: true,
+                    skipHeaderRows: INFLUENCER_VIDEO_SKIP_HEADER_ROWS,
+                    dataStartRow: INFLUENCER_VIDEO_DATA_START_ROW,
                     notes: [
                       '仅支持 .xlsx 格式。',
-                      '忽略表格前 2 行，从第 3 行起读取数据。',
-                      '仅导入第 1–6 列；内容 id（第 2 列）为唯一标识，重复记录将跳过。',
+                      '内容 id（第 2 列）为唯一标识，重复记录将跳过。',
                     ],
                   })}
                   <input type="file" id="fileInput" accept="${XLSX_ACCEPT}" style="display:none" />

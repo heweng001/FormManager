@@ -2645,15 +2645,17 @@ function parseCreatedTimeToYmd(value) {
 
 function extractSampleOrderFields(data) {
   const buyer_username = readOrderFieldFromData(data, 'buyer_username', [
-    '达人id', '达人ID', 'Buyer Username', 'buyer username', 'BuyerUsername',
+    '达人id', '达人ID', 'Buyer Username', 'buyer username', 'BuyerUsername', 'Creator Username',
   ]);
-  const sku_id = readOrderFieldFromData(data, 'sku_id', ['SKU ID', 'Sku ID', 'SKU ID ', 'skuid', 'SKU']);
+  const sku_id = readOrderFieldFromData(data, 'sku_id', ['skuID', 'SKU ID', 'Sku ID', 'skuid', 'SKU', 'sku_id']);
   const order_id = readOrderFieldFromData(data, 'order_id', [
-    'Order ID', 'order id', 'OrderID', '订单 ID', '订单id', '订单ID', 'Main order ID', 'Platform order ID',
-  ]) || String(data.unique_key ?? '').trim();
-  const created_time_raw = readOrderFieldFromData(data, 'created_time_raw', [
-    'Created Time', 'created time', 'CreatedTime', 'Creater Time', '寄样日期',
+    '订单id', '订单ID', 'Order ID', 'order id', 'OrderID', 'Main order ID', 'Platform order ID',
   ]);
+  const created_time_raw =
+    readOrderFieldFromData(data, 'created_time_raw', [
+      '寄样时间', '寄样日期', 'Created Time', 'created time', 'CreatedTime',
+    ]) ||
+    readOrderFieldFromData(data, 'payment_time_raw', ['支付时间', 'Payment Time', 'payment_time']);
   const created_time_ymd = parseCreatedTimeToYmd(created_time_raw);
   return { buyer_username, sku_id, order_id, created_time_raw, created_time_ymd };
 }

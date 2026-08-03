@@ -359,12 +359,12 @@ function parseFile(filePath) {
 
 function parseSampleOrderFile(filePath) {
   const rows = readSpreadsheetRows(filePath);
-  if (rows.length < 2) return { rows: [] };
+  if (rows.length < 3) return { rows: [] };
   const parsedRows = rows
-    .slice(1)
+    .slice(2)
     .map((row) => {
       const data = buildSampleOrderImportData(row);
-      const uniqueKey = toCellValue(data.unique_key) || toCellValue(data.order_id);
+      const uniqueKey = toCellValue(data.order_id);
       return { unique_key: uniqueKey, data };
     })
     .filter((item) => item.unique_key);
@@ -2007,7 +2007,7 @@ app.post('/api/sample-orders/upload', requireAuth, upload.single('file'), async 
     if (!rows.length) {
       return res.status(400).json({
         success: false,
-        message: '未能从文件中解析到有效数据。请确认首列为唯一标识且数据从第 2 行开始。',
+        message: '未能从文件中解析到有效数据。请确认忽略前 2 行后从第 3 行起有数据，且第 1 列（订单 id）不为空。',
       });
     }
 
