@@ -390,12 +390,30 @@ function getSkuIdFromOrderRow(row, column) {
   return '';
 }
 
+function normalizeSkuMatchKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function lookupSkuModelEntry(skuId, skuModelMap = {}) {
+  const text = String(skuId || '').trim();
+  if (!text) return null;
+  const direct = skuModelMap[text];
+  if (direct) {
+    return typeof direct === 'string' ? { model_name: direct, shop_name: '' } : direct;
+  }
+  const normalized = normalizeSkuMatchKey(text);
+  const matchedKey = Object.keys(skuModelMap).find((key) => normalizeSkuMatchKey(key) === normalized);
+  if (!matchedKey) return null;
+  const entry = skuModelMap[matchedKey];
+  return typeof entry === 'string' ? { model_name: entry, shop_name: '' } : entry;
+}
+
 function resolveSkuModelDisplay(raw, row, column, skuModelMap = {}) {
   const skuId = getSkuIdFromOrderRow(row, column) || String(raw || '').trim();
   if (!skuId) return null;
-  const model = skuModelMap[skuId];
-  if (!model) return null;
-  return { skuId, model };
+  const entry = lookupSkuModelEntry(skuId, skuModelMap);
+  if (!entry?.model_name) return null;
+  return { skuId, model: entry.model_name, shopName: entry.shop_name || '' };
 }
 
 function buildShopModelDisplay(shopName, model) {
@@ -458,8 +476,8 @@ function renderOrderTableCellHtml(row, column, skuModelMap = {}) {
   }
   const skuDisplay = isSkuIdColumn(column) ? resolveSkuModelDisplay(raw, row, column, skuModelMap) : null;
   if (skuDisplay) {
-    const title = `${skuDisplay.model}（SKU ${skuDisplay.skuId}）`;
-    return `<td class="cell-truncate cell-sku-model" title="${escapeAttr(title)}">${escapeHtml(skuDisplay.model)}</td>`;
+    const displayText = buildShopModelDisplay(skuDisplay.shopName, skuDisplay.model) || skuDisplay.model;
+    return `<td class="cell-truncate cell-sku-model" title="${escapeAttr(skuDisplay.skuId)}">${escapeHtml(displayText)}</td>`;
   }
   const text = raw || '-';
   return `<td class="cell-truncate" title="${escapeAttr(raw)}">${escapeHtml(text)}</td>`;

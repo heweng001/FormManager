@@ -1162,11 +1162,28 @@ function getAllSkuModels() {
 function getSkuModelLookupMap() {
   const map = Object.create(null);
   queryRows(
-    `SELECT sku_id, model_name FROM sku_models WHERE TRIM(COALESCE(sku_id, '')) != '' AND TRIM(COALESCE(model_name, '')) != ''`
+    `SELECT sku_id, model_name, shop_name FROM sku_models WHERE TRIM(COALESCE(sku_id, '')) != '' AND TRIM(COALESCE(model_name, '')) != ''`
   ).forEach((row) => {
-    map[String(row.sku_id).trim()] = String(row.model_name).trim();
+    map[String(row.sku_id).trim()] = {
+      model_name: String(row.model_name).trim(),
+      shop_name: String(row.shop_name || '').trim(),
+    };
   });
   return map;
+}
+
+function lookupSkuModelEntry(skuId, skuModelMap) {
+  const text = String(skuId || '').trim();
+  if (!text || !skuModelMap) return null;
+  if (skuModelMap[text]) {
+    const entry = skuModelMap[text];
+    return typeof entry === 'string' ? { model_name: entry, shop_name: '' } : entry;
+  }
+  const normalized = normalizeMatchKey(text);
+  const matchedKey = Object.keys(skuModelMap).find((item) => normalizeMatchKey(item) === normalized);
+  if (!matchedKey) return null;
+  const entry = skuModelMap[matchedKey];
+  return typeof entry === 'string' ? { model_name: entry, shop_name: '' } : entry;
 }
 
 function getSkuModelById(id) {
@@ -2913,10 +2930,8 @@ function buildSampleOrderIndexMaps() {
 function resolveSkuModelName(skuId, skuModelMap) {
   const text = String(skuId || '').trim();
   if (!text) return '未知型号';
-  if (skuModelMap[text]) return skuModelMap[text];
-  const normalized = normalizeMatchKey(text);
-  const matchedKey = Object.keys(skuModelMap).find((item) => normalizeMatchKey(item) === normalized);
-  return matchedKey ? skuModelMap[matchedKey] : text;
+  const entry = lookupSkuModelEntry(text, skuModelMap);
+  return entry?.model_name || text;
 }
 
 function buildSameModelDuplicateGroups(buyerKey, maps, skuModelMap) {
