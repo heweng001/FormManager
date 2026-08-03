@@ -905,6 +905,7 @@ async function initDatabase() {
   migrateResyncSampleDatesPerSku();
   migrateReconcileSampleOrderYmdFromRaw();
   migrateReconcileSampleOrderYmdFromRawV2();
+  migrateReconcileAlliancePaymentYmd();
   migrateInfluencerTagsToProfile();
   migrateStaffMailSettings();
   migrateEmailSendLogs();
@@ -2181,6 +2182,13 @@ function migrateReconcileSampleOrderYmdFromRawV2() {
   saveDb();
 }
 
+function migrateReconcileAlliancePaymentYmd() {
+  ensureAppMetaTable();
+  if (getAppMeta('alliance_payment_ymd_reconcile_v1') === '1') return;
+  rebuildAllianceOrderDerivedFields();
+  setAppMeta('alliance_payment_ymd_reconcile_v1', '1');
+}
+
 function migrateInfluencerTagsToProfile() {
   ensureAppMetaTable();
   if (getAppMeta('influencer_tags_profile_only_v1') === '1') return;
@@ -2633,7 +2641,7 @@ function isValidYmd(ymd) {
   return month >= 1 && month <= 12 && day >= 1 && day <= 31;
 }
 
-function parseSlashDateToYmd(parts, preferMonthFirst = true) {
+function parseSlashDateToYmd(parts) {
   const a = Number(parts[0]);
   const b = Number(parts[1]);
   const y = String(parts[2]);
@@ -2645,12 +2653,15 @@ function parseSlashDateToYmd(parts, preferMonthFirst = true) {
   } else if (b > 12) {
     month = a;
     day = b;
-  } else if (preferMonthFirst) {
+  } else if (a > b) {
     month = a;
     day = b;
-  } else {
+  } else if (a < b) {
     day = a;
     month = b;
+  } else {
+    month = a;
+    day = b;
   }
   if (month < 1 || month > 12 || day < 1 || day > 31) return '';
   const ymd = `${y}${String(month).padStart(2, '0')}${String(day).padStart(2, '0')}`;
@@ -2675,7 +2686,7 @@ function parseCreatedTimeToYmd(value) {
   }
   if (/^\d{1,2}[./-]\d{1,2}[./-]\d{4}/.test(text)) {
     const parts = text.split(/[ T]/)[0].split(/[-/.]/);
-    return parseSlashDateToYmd(parts, true);
+    return parseSlashDateToYmd(parts);
   }
   const serial = Number(text);
   if (!Number.isNaN(serial) && serial > 30000 && serial < 100000) {
@@ -2694,6 +2705,15 @@ function resolveSampleOrderYmd(order) {
     if (parsed) return parsed;
   }
   return String(order?.created_time_ymd || '').trim();
+}
+
+function resolveAlliancePaymentYmd(order) {
+  const raw = String(order?.payment_time_raw || '').trim();
+  if (raw) {
+    const parsed = parseCreatedTimeToYmd(raw);
+    if (parsed) return parsed;
+  }
+  return String(order?.payment_time_ymd || '').trim();
 }
 
 function extractSampleOrderFields(data) {
@@ -3380,7 +3400,7 @@ function rebuildAllianceOrderDerivedFields() {
     }
     const fields = extractAllianceOrderFields(data);
     const payment_time_raw = fields.payment_time_raw || row.payment_time_raw || '';
-    const payment_time_ymd = fields.payment_time_ymd || parseCreatedTimeToYmd(payment_time_raw);
+    const payment_time_ymd = resolveAlliancePaymentYmd({ payment_time_raw, payment_time_ymd: fields.payment_time_ymd });
     db.run(
       `UPDATE alliance_orders SET
         content_id = ?, creator_username = ?, order_id = ?,
@@ -3736,7 +3756,7 @@ function getOrderedAfterSampleInfluencerKeys(filters = {}) {
     } else if (filters.assignee_filter && !meta.assignees.includes(filters.assignee_filter)) return;
     if (filters.scope_assignee && !meta.assignees.includes(filters.scope_assignee)) return;
     if ((filters.assignee_filter || filters.scope_assignee) && !meta.assignees.length && filters.assignee_filter !== SAMPLE_STATS_EMPTY_ASSIGNEE_KEY) return;
-    const influencerKey = normalizeMatchKey(order.buyer_username);
+    const influencerKey = resolveCanonicalInfluencerKey(order.buyer_username);
     if (!sampledInfluencers.has(influencerKey)) sampledInfluencers.set(influencerKey, new Set());
     sampledInfluencers.get(influencerKey).add(ymd);
   });
@@ -3745,16 +3765,15 @@ function getOrderedAfterSampleInfluencerKeys(filters = {}) {
   rebuildAllianceOrderDerivedFields();
   queryRows(
     `
-    SELECT creator_username, payment_time_ymd
+    SELECT creator_username, payment_time_ymd, payment_time_raw
     FROM alliance_orders
-    WHERE TRIM(COALESCE(payment_time_ymd, '')) != ''
-      AND TRIM(COALESCE(creator_username, '')) != ''
+    WHERE TRIM(COALESCE(creator_username, '')) != ''
     `
   ).forEach((order) => {
-    const influencerKey = normalizeMatchKey(order.creator_username);
+    const influencerKey = resolveCanonicalInfluencerKey(order.creator_username);
     const sampleDates = sampledInfluencers.get(influencerKey);
     if (!sampleDates || !sampleDates.size) return;
-    const paymentYmd = String(order.payment_time_ymd || '').trim();
+    const paymentYmd = resolveAlliancePaymentYmd(order);
     if ([...sampleDates].some((sampleYmd) => paymentYmd > sampleYmd)) {
       orderedKeys.add(influencerKey);
     }
@@ -3812,7 +3831,7 @@ function getSampleShipmentStats(filters = {}) {
     if (isAllocationTaggedInfluencerForStats(meta.tags, filters)) return;
     const assignees = getSampleStatsAssigneeTargets(meta, filters);
     if (!assignees.length) return;
-    const influencerKey = normalizeMatchKey(order.buyer_username);
+    const influencerKey = resolveCanonicalInfluencerKey(order.buyer_username);
     assignees.forEach((assignee) => {
       const bucket = ensureBucket(assignee);
       bucket.sample_count += 1;
@@ -3827,15 +3846,14 @@ function getSampleShipmentStats(filters = {}) {
   const videoIndex = buildInfluencerVideosIndexByCreatorKey();
   queryRows(
     `
-    SELECT creator_username, content_id, is_refund, payment_time_ymd
+    SELECT creator_username, content_id, is_refund, payment_time_ymd, payment_time_raw
     FROM alliance_orders
-    WHERE TRIM(COALESCE(payment_time_ymd, '')) != ''
-      AND TRIM(COALESCE(creator_username, '')) != ''
+    WHERE TRIM(COALESCE(creator_username, '')) != ''
     `
   ).forEach((order) => {
-    const paymentYmd = String(order.payment_time_ymd || '').trim();
+    const paymentYmd = resolveAlliancePaymentYmd(order);
     if (!paymentYmd) return;
-    const influencerKey = normalizeMatchKey(order.creator_username);
+    const influencerKey = resolveCanonicalInfluencerKey(order.creator_username);
     const meta = getInfluencerMetaForStats(metaMap, order.creator_username, order.creator_username);
     if (isAllocationTaggedInfluencerForStats(meta.tags, filters)) return;
     const assignees = getSampleStatsAssigneeTargets(meta, filters);
