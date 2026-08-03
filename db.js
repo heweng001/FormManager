@@ -903,6 +903,7 @@ async function initDatabase() {
   migrateRecordsTags();
   migrateRecordsMeta();
   migrateResyncSampleDatesPerSku();
+  migrateReconcileSampleOrderYmdFromRaw();
   migrateInfluencerTagsToProfile();
   migrateStaffMailSettings();
   migrateEmailSendLogs();
@@ -2161,6 +2162,15 @@ function migrateResyncSampleDatesPerSku() {
   setAppMeta('sample_dates_per_sku_v1', '1');
 }
 
+function migrateReconcileSampleOrderYmdFromRaw() {
+  ensureAppMetaTable();
+  if (getAppMeta('sample_order_ymd_reconcile_v1') === '1') return;
+  backfillSampleOrderYmdFromRaw();
+  syncSampleDatesToRecords({ deferSave: true });
+  setAppMeta('sample_order_ymd_reconcile_v1', '1');
+  saveDb();
+}
+
 function migrateInfluencerTagsToProfile() {
   ensureAppMetaTable();
   if (getAppMeta('influencer_tags_profile_only_v1') === '1') return;
@@ -2493,7 +2503,7 @@ function getPublishedContentIdsAfterSampleForAssignee(assignee, dateFrom, dateTo
      FROM sample_orders
      WHERE TRIM(COALESCE(buyer_username, '')) != ''`
   ).forEach((order) => {
-    const ymd = order.created_time_ymd || parseCreatedTimeToYmd(order.created_time_raw);
+    const ymd = resolveSampleOrderYmd(order);
     if (!ymdInRangeForStats(ymd, dateFrom, dateTo)) return;
     const meta = getInfluencerMetaForStats(metaMap, order.buyer_username, order.buyer_username);
     if (isAllocationTaggedInfluencerForStats(meta.tags, filters)) return;
@@ -2547,7 +2557,7 @@ function getSampledCreatorUsernamesForAssigneeInRange(assignee, dateFrom, dateTo
      FROM sample_orders
      WHERE TRIM(COALESCE(buyer_username, '')) != ''`
   ).forEach((order) => {
-    const ymd = order.created_time_ymd || parseCreatedTimeToYmd(order.created_time_raw);
+    const ymd = resolveSampleOrderYmd(order);
     if (!ymdInRangeForStats(ymd, dateFrom, dateTo)) return;
     const meta = getInfluencerMetaForStats(metaMap, order.buyer_username, order.buyer_username);
     const assignees = getSampleStatsAssigneeTargets(meta, { scope_assignee: undefined });
@@ -2658,6 +2668,15 @@ function parseCreatedTimeToYmd(value) {
   const date = new Date(text);
   if (!Number.isNaN(date.getTime())) return formatYmdFromDate(date);
   return '';
+}
+
+function resolveSampleOrderYmd(order) {
+  const raw = String(order?.created_time_raw || '').trim();
+  if (raw) {
+    const parsed = parseCreatedTimeToYmd(raw);
+    if (parsed) return parsed;
+  }
+  return String(order?.created_time_ymd || '').trim();
 }
 
 function extractSampleOrderFields(data) {
@@ -2789,11 +2808,11 @@ function getSampleOrders(filters = {}) {
 function backfillSampleOrderYmdFromRaw() {
   let changed = false;
   queryRows(
-    `SELECT id, created_time_raw FROM sample_orders
-     WHERE TRIM(COALESCE(created_time_ymd, '')) = '' AND TRIM(COALESCE(created_time_raw, '')) != ''`
+    `SELECT id, created_time_raw, created_time_ymd FROM sample_orders
+     WHERE TRIM(COALESCE(created_time_raw, '')) != ''`
   ).forEach((row) => {
     const ymd = parseCreatedTimeToYmd(row.created_time_raw);
-    if (ymd) {
+    if (ymd && ymd !== String(row.created_time_ymd || '').trim()) {
       db.run('UPDATE sample_orders SET created_time_ymd = ? WHERE id = ?', [ymd, row.id]);
       changed = true;
     }
@@ -2906,7 +2925,7 @@ function buildSampleOrderIndexMaps() {
   const byBuyerSku = new Map();
   const byBuyer = new Map();
   getAllSampleOrdersForSync().forEach((order) => {
-    const date = order.created_time_ymd || parseCreatedTimeToYmd(order.created_time_raw);
+    const date = resolveSampleOrderYmd(order);
     if (!date) return;
     const item = { date, sample_order_id: order.id, sku_id: String(order.sku_id || '').trim() };
     const buyerKey = normalizeMatchKey(order.buyer_username);
@@ -2960,7 +2979,7 @@ function getLatestSampleOrderSummaryByBuyer() {
   getAllSampleOrdersForSync().forEach((order) => {
     const key = normalizeMatchKey(order.buyer_username);
     if (!key) return;
-    const sampleDate = order.created_time_ymd || parseCreatedTimeToYmd(order.created_time_raw);
+    const sampleDate = resolveSampleOrderYmd(order);
     if (!sampleDate) return;
     const existing = map.get(key);
     if (
@@ -3009,7 +3028,7 @@ function syncSampleDatesToRecords(options = {}) {
 
   orderGroups.forEach((items) => {
     items.sort((a, b) => {
-      const ymd = String(b.created_time_ymd || '').localeCompare(String(a.created_time_ymd || ''));
+      const ymd = String(resolveSampleOrderYmd(b)).localeCompare(String(resolveSampleOrderYmd(a)));
       if (ymd !== 0) return ymd;
       return Number(b.id) - Number(a.id);
     });
@@ -3032,7 +3051,7 @@ function syncSampleDatesToRecords(options = {}) {
     }
 
     const latest = matches[0];
-    const sampleDate = latest.created_time_ymd || parseCreatedTimeToYmd(latest.created_time_raw);
+    const sampleDate = resolveSampleOrderYmd(latest);
     db.run('UPDATE records SET sample_date = ?, sample_order_id = ? WHERE id = ?', [
       sampleDate || '',
       latest.id,
@@ -3692,7 +3711,7 @@ function getOrderedAfterSampleInfluencerKeys(filters = {}) {
      FROM sample_orders
      WHERE TRIM(COALESCE(buyer_username, '')) != ''`
   ).forEach((order) => {
-    const ymd = order.created_time_ymd || parseCreatedTimeToYmd(order.created_time_raw);
+    const ymd = resolveSampleOrderYmd(order);
     if (!ymdInRangeForStats(ymd, sampleFrom, sampleTo)) return;
     const meta = getInfluencerMetaForStats(metaMap, order.buyer_username, order.buyer_username);
     if (filters.assignee_filter === SAMPLE_STATS_EMPTY_ASSIGNEE_KEY) {
@@ -3770,7 +3789,7 @@ function getSampleShipmentStats(filters = {}) {
      FROM sample_orders
      WHERE TRIM(COALESCE(buyer_username, '')) != ''`
   ).forEach((order) => {
-    const ymd = order.created_time_ymd || parseCreatedTimeToYmd(order.created_time_raw);
+    const ymd = resolveSampleOrderYmd(order);
     if (!ymdInRangeForStats(ymd, range.start, range.end)) return;
     const meta = getInfluencerMetaForStats(metaMap, order.buyer_username, order.buyer_username);
     if (isAllocationTaggedInfluencerForStats(meta.tags, filters)) return;
@@ -5453,7 +5472,7 @@ function getAssigneeStats(filters = {}) {
      FROM sample_orders
      WHERE TRIM(COALESCE(buyer_username, '')) != ''`
   ).forEach((order) => {
-    const ymd = order.created_time_ymd || parseCreatedTimeToYmd(order.created_time_raw);
+    const ymd = resolveSampleOrderYmd(order);
     const periodKeys = periodKeysForYmd(ymd, ranges);
     if (!periodKeys.length) return;
     const meta = getInfluencerMetaForStats(metaMap, order.buyer_username, order.buyer_username);
