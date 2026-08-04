@@ -326,46 +326,210 @@ const BEIJING_TZ = 'Asia/Shanghai';
 const BEIJING_LOCALE = 'zh-CN';
 const BEIJING_LOCALE_OPTIONS = { timeZone: BEIJING_TZ, hour12: false };
 
-function parseDateTimeValue(value, storage = 'utc') {
+function pad2(value) {
+  return String(value ?? '').padStart(2, '0');
+}
+
+function formatYmdHmParts({ year, month, day, hour, minute, second, hasTime, hasSeconds }) {
+  const y = String(year);
+  const datePart = `${y}/${pad2(month)}/${pad2(day)}`;
+  if (!hasTime) return datePart;
+  const timePart = `${pad2(hour)}:${pad2(minute)}`;
+  if (hasSeconds) return `${datePart} ${timePart}:${pad2(second || 0)}`;
+  return `${datePart} ${timePart}`;
+}
+
+function formatDateFromJsDate(date, { includeSeconds = true } = {}) {
+  if (!date || Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BEIJING_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value || '';
+  return formatYmdHmParts({
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: get('hour'),
+    minute: get('minute'),
+    second: get('second'),
+    hasTime: true,
+    hasSeconds: includeSeconds,
+  });
+}
+
+function resolveSlashDateParts(a, b, preferMonthFirst = false) {
+  const first = Number(a);
+  const second = Number(b);
+  if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+  let month;
+  let day;
+  if (first > 12) {
+    day = first;
+    month = second;
+  } else if (second > 12) {
+    month = first;
+    day = second;
+  } else if (preferMonthFirst) {
+    month = first;
+    day = second;
+  } else if (first > second) {
+    month = first;
+    day = second;
+  } else if (first < second) {
+    day = first;
+    month = second;
+  } else {
+    month = first;
+    day = second;
+  }
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { month, day };
+}
+
+function extractTimeParts(text) {
+  const match = String(text || '').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = match[3] != null ? Number(match[3]) : null;
+  const ampm = (match[4] || '').toUpperCase();
+  if (ampm === 'PM' && hour < 12) hour += 12;
+  if (ampm === 'AM' && hour === 12) hour = 0;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  if (second != null && (second < 0 || second > 59)) return null;
+  return {
+    hour,
+    minute,
+    second: second == null ? 0 : second,
+    hasSeconds: match[3] != null,
+  };
+}
+
+function parseDateTimeParts(value, storage = 'utc') {
   const text = String(value || '').trim();
   if (!text) return null;
 
+  if (/^\d{8}$/.test(text)) {
+    return {
+      year: text.slice(0, 4),
+      month: text.slice(4, 6),
+      day: text.slice(6, 8),
+      hasTime: false,
+    };
+  }
+
+  if (/^\d+(\.\d+)?$/.test(text)) {
+    const serial = Number(text);
+    if (serial > 30000 && serial < 100000) {
+      const epoch = new Date(Date.UTC(1899, 11, 30));
+      const date = new Date(epoch.getTime() + serial * 86400000);
+      return {
+        year: date.getUTCFullYear(),
+        month: date.getUTCMonth() + 1,
+        day: date.getUTCDate(),
+        hour: 0,
+        minute: 0,
+        second: 0,
+        hasTime: false,
+        hasSeconds: false,
+      };
+    }
+  }
+
   if (/[zZ]$/.test(text) || /[+-]\d{2}:\d{2}$/.test(text)) {
     const date = new Date(text);
-    return Number.isNaN(date.getTime()) ? null : date;
+    if (Number.isNaN(date.getTime())) return null;
+    return { date, convertToBeijing: true };
   }
 
-  const match = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)/);
-  if (match) {
-    const suffix = storage === 'beijing' ? '+08:00' : 'Z';
-    const date = new Date(`${match[1]}T${match[2]}${suffix}`);
-    return Number.isNaN(date.getTime()) ? null : date;
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (isoMatch) {
+    const hasTime = isoMatch[4] != null;
+    if (storage === 'utc' && hasTime) {
+      const suffix = 'Z';
+      const time = `${isoMatch[4]}:${isoMatch[5]}:${isoMatch[6] || '00'}`;
+      const date = new Date(`${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}T${time}${suffix}`);
+      if (!Number.isNaN(date.getTime())) return { date, convertToBeijing: true };
+    }
+    return {
+      year: isoMatch[1],
+      month: isoMatch[2],
+      day: isoMatch[3],
+      hour: Number(isoMatch[4] || 0),
+      minute: Number(isoMatch[5] || 0),
+      second: Number(isoMatch[6] || 0),
+      hasTime,
+      hasSeconds: isoMatch[6] != null,
+    };
   }
 
-  const normalized = text.includes('T') ? text : text.replace(' ', 'T');
-  const date = new Date(normalized);
+  const slashMatch = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
+  if (slashMatch) {
+    const preferMonthFirst = /\b(AM|PM)\b/i.test(text);
+    const resolved = resolveSlashDateParts(slashMatch[1], slashMatch[2], preferMonthFirst);
+    if (!resolved) return null;
+    const time = extractTimeParts(text);
+    return {
+      year: slashMatch[3],
+      month: resolved.month,
+      day: resolved.day,
+      hour: time?.hour || 0,
+      minute: time?.minute || 0,
+      second: time?.second || 0,
+      hasTime: Boolean(time),
+      hasSeconds: Boolean(time?.hasSeconds),
+    };
+  }
+
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) return { date, convertToBeijing: true };
+  return null;
+}
+
+function parseDateTimeValue(value, storage = 'utc') {
+  const parsed = parseDateTimeParts(value, storage);
+  if (!parsed) return null;
+  if (parsed.date) return parsed.date;
+  const hour = parsed.hasTime ? Number(parsed.hour || 0) : 12;
+  const minute = parsed.hasTime ? Number(parsed.minute || 0) : 0;
+  const second = parsed.hasTime ? Number(parsed.second || 0) : 0;
+  const date = new Date(
+    `${parsed.year}-${pad2(parsed.month)}-${pad2(parsed.day)}T${pad2(hour)}:${pad2(minute)}:${pad2(second)}+08:00`
+  );
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function formatDateTime(value, options = {}) {
-  if (!value) return '-';
+  if (!value && value !== 0) return '-';
   const text = String(value).trim();
+  if (!text) return '-';
   const storage = options.storage || 'utc';
+  const parsed = parseDateTimeParts(text, storage);
+  if (!parsed) return text;
 
-  if (/^\d+(\.\d+)?$/.test(text)) {
-    const serial = Number(text);
-    if (serial > 30000 && serial < 60000) {
-      const epoch = new Date(1899, 11, 30);
-      return new Date(epoch.getTime() + serial * 86400000).toLocaleString(
-        BEIJING_LOCALE,
-        BEIJING_LOCALE_OPTIONS
-      );
-    }
+  if (parsed.date || parsed.convertToBeijing) {
+    const date = parsed.date || parseDateTimeValue(text, storage);
+    const formatted = formatDateFromJsDate(date, { includeSeconds: options.includeSeconds !== false });
+    return formatted || text;
   }
 
-  const date = parseDateTimeValue(text, storage);
-  if (!date) return text;
-  return date.toLocaleString(BEIJING_LOCALE, BEIJING_LOCALE_OPTIONS);
+  return formatYmdHmParts({
+    year: parsed.year,
+    month: parsed.month,
+    day: parsed.day,
+    hour: parsed.hour,
+    minute: parsed.minute,
+    second: parsed.second,
+    hasTime: parsed.hasTime,
+    hasSeconds: parsed.hasSeconds,
+  });
 }
 
 function formatImportTimeValue(value) {
@@ -470,8 +634,13 @@ function renderOrderTableCellHtml(row, column, skuModelMap = {}) {
     }
     return `<td class="cell-truncate">-</td>`;
   }
-  if (column.key === 'created_time_raw' || column.key === 'payment_time_raw' || column.key === 'received_time_raw') {
-    const text = raw ? formatDateTime(raw) || String(raw) : '-';
+  if (
+    column.key === 'created_time_raw' ||
+    column.key === 'payment_time_raw' ||
+    column.key === 'received_time_raw' ||
+    column.key === 'publish_date_raw'
+  ) {
+    const text = raw ? formatDateTime(raw, { storage: 'beijing' }) || String(raw) : '-';
     return `<td class="cell-truncate" title="${escapeAttr(raw)}">${escapeHtml(text)}</td>`;
   }
   const skuDisplay = isSkuIdColumn(column) ? resolveSkuModelDisplay(raw, row, column, skuModelMap) : null;

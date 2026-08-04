@@ -115,7 +115,7 @@
       }
       tbody.innerHTML = rows.map((row) => `
         <tr>
-          <td class="cell-import-time">${escapeHtml(row.created_at || '-')}</td>
+          <td class="cell-import-time">${escapeHtml(formatImportTimeValue(row.created_at) || '-')}</td>
           <td>${escapeHtml(row.created_by || '-')}</td>
           <td>${escapeHtml(row.sender_email || '-')}</td>
           <td class="cell-truncate" title="${escapeAttr(row.subject_template || '')}">${escapeHtml(row.subject_template || '-')}</td>
@@ -160,7 +160,7 @@
           <td>${escapeHtml(log.influencer_id || '-')}</td>
           <td>${escapeHtml(log.to_email || '-')}</td>
           <td>${renderEmailLogStatusBadge(log.status)}</td>
-          <td class="cell-import-time">${escapeHtml(log.sent_at || '-')}</td>
+          <td class="cell-import-time">${escapeHtml(formatImportTimeValue(log.sent_at) || '-')}</td>
           <td class="cell-truncate" title="${escapeAttr(log.subject || '')}">${escapeHtml(log.subject || '-')}</td>
           <td class="cell-truncate" title="${escapeAttr(log.error_message || '')}">${escapeHtml(log.error_message || '-')}</td>
         </tr>
