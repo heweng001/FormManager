@@ -113,7 +113,7 @@
           const influencerId = btn.dataset.influencerId;
           showInfluencerDetailModal({
             influencerId,
-            defaultTab: 'collab',
+            defaultTab: 'detail',
             enableFollowUp: true,
           });
         });
@@ -263,8 +263,7 @@
               <div class="erp-modal-header">达人详情</div>
               <div class="erp-modal-body">
                 <div class="erp-tabs erp-detail-modal-tabs" id="influencerDetailTabs">
-                  <button type="button" class="erp-tab active" data-tab="audit">审核信息</button>
-                  <button type="button" class="erp-tab" data-tab="collab">合作信息</button>
+                  <button type="button" class="erp-tab active" data-tab="detail">达人详情</button>
                   <button type="button" class="erp-tab" data-tab="followup">跟进记录</button>
                 </div>
                 <div id="detailAuditContent" class="erp-detail-stack"></div>

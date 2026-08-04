@@ -506,6 +506,12 @@ input.erp-input.erp-date-input {
   min-width: 0;
 }
 
+.erp-influencer-id--collaborated,
+.erp-influencer-id--collaborated .erp-link-external {
+  color: #0f766e;
+  font-weight: 600;
+}
+
 .erp-audit-app-badge {
   flex-shrink: 0;
   min-width: 18px;

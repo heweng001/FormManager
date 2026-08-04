@@ -1231,10 +1231,26 @@ function renderPinButton(influencerId, pinned) {
   return `<button type="button" class="erp-pin-btn${active ? ' is-pinned' : ''}" data-influencer-id="${escapeAttr(String(influencerId || ''))}" title="${label}" aria-label="${label}"><span class="erp-pin-icon" aria-hidden="true"></span></button>`;
 }
 
-function renderInfluencerIdCell(id, pinned, renderLink) {
+function renderInfluencerIdCell(id, pinned, renderLink, options = {}) {
   const linkHtml = typeof renderLink === 'function' ? renderLink(id) : escapeHtml(id || '-');
   if (!id) return linkHtml;
-  return `<span class="erp-influencer-id-cell">${linkHtml}${renderPinButton(id, pinned)}</span>`;
+  const isCollaborated = !!options?.isCollaborated;
+  const idHtml = isCollaborated
+    ? `<span class="erp-influencer-id--collaborated" title="该达人已在已合作列表">${linkHtml}</span>`
+    : linkHtml;
+  return `<span class="erp-influencer-id-cell">${idHtml}${renderPinButton(id, pinned)}</span>`;
+}
+
+function renderInfluencerApplicationCountBadge(record, options = {}) {
+  const count = Number(record?.influencer_application_count || 0);
+  const minCount = Number.isFinite(Number(options?.minCount)) ? Number(options.minCount) : 1;
+  if (!Number.isFinite(count) || count < minCount) return '';
+  const mixed = !!record?.influencer_mixed_audit;
+  const cls = mixed ? 'erp-audit-app-badge erp-audit-app-badge--mixed' : 'erp-audit-app-badge erp-audit-app-badge--same';
+  const title = mixed
+    ? `该达人共 ${count} 条申请，审核状态不完全一致，点击查看详情`
+    : `该达人共 ${count} 条申请，点击查看详情`;
+  return `<button type="button" class="${cls}" data-action="open-influencer-detail" data-influencer-id="${escapeAttr(record.influencer_id || '')}" data-record-id="${escapeAttr(record.id || record.record_id || '')}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">${escapeHtml(String(count))}</button>`;
 }
 
 function formatEmailSendDateLabel(sentAt) {
@@ -2530,6 +2546,57 @@ function renderInfluencerCollabDetailHtml(row, renameLogs = []) {
     .join('');
 }
 
+function renderAssigneeDetailValue(row) {
+  if (row?.assignee_conflict && row?.assignee_names?.length) {
+    return `<span class="assignee-conflict" title="${escapeAttr(row.assignee_names.join('、'))}">${escapeHtml(row.assignee || '冲突')}</span>`;
+  }
+  return escapeHtml(row?.assignee || '-');
+}
+
+function renderInfluencerMergedDetailHtml(auditRecords, collabRow, renameLogs = []) {
+  const list = Array.isArray(auditRecords) ? auditRecords : auditRecords ? [auditRecords] : [];
+  const primary = list[0] || {};
+  const row = {
+    ...(collabRow && typeof collabRow === 'object' ? collabRow : {}),
+    influencer_id: (collabRow && collabRow.influencer_id) || primary.influencer_id || '',
+    assignee: (collabRow && collabRow.assignee) || primary.assignee || '',
+    assignee_names: (collabRow && collabRow.assignee_names) || primary.assignee_names || [],
+    assignee_conflict:
+      collabRow && collabRow.assignee_conflict != null
+        ? collabRow.assignee_conflict
+        : !!primary.assignee_conflict,
+    tags: (collabRow && collabRow.tags != null ? collabRow.tags : primary.tags) || '',
+  };
+  const overviewFields = [
+    ['达人id', renderInfluencerIdEditSectionHtml(row.influencer_id, renameLogs)],
+    ['负责人', renderAssigneeDetailValue(row)],
+    ['标签', renderTagsDisplayReadonly(row.tags)],
+    ['履约进展', escapeHtml(row.fulfillment_progress || '-')],
+    ['达人备注', escapeHtml(row.influencer_remark || '-')],
+    ['发视频数', escapeHtml(String(row.published_video_count ?? 0))],
+    ['出单视频数', escapeHtml(String(row.video_count ?? 0))],
+    ['出单数', escapeHtml(String(row.order_count ?? 0))],
+    ['退款数', escapeHtml(String(row.refund_count ?? 0))],
+    ['寄样日期', renderCollaboratedSampleDateDetail(row)],
+    ['达人寄样', list.length ? renderInfluencerSampleDateCell(primary) : '-'],
+  ];
+  const overviewHtml = overviewFields
+    .map(
+      ([label, val]) =>
+        `<div class="erp-detail-label">${label}</div><div class="erp-detail-value">${val}</div>`
+    )
+    .join('');
+  const sharedHtml = `
+    <div class="erp-detail-section-title">达人概况</div>
+    <div class="erp-detail-grid erp-detail-shared-grid">${overviewHtml}</div>
+  `;
+  const tableHtml = `
+    <div class="erp-detail-section-title">申请信息（${list.length} 条）</div>
+    ${renderAuditApplicationsTableHtml(list, { emptyText: '暂无审核申请' })}
+  `;
+  return `${sharedHtml}${tableHtml}`;
+}
+
 const INFLUENCER_AUDIT_DETAIL_FIELDS = [
   { key: 'influencer_id', label: '达人id' },
   { key: 'assignee', label: '负责人' },
@@ -2707,13 +2774,27 @@ async function loadAndRenderFollowUps(influencerId) {
 
 let influencerDetailModalBound = false;
 
-function switchInfluencerDetailTab(tab) {
+function normalizeInfluencerDetailTab(tab, enableFollowUp = false) {
+  if (tab === 'followup' && enableFollowUp) return 'followup';
+  return 'detail';
+}
+
+function configureInfluencerDetailTabs(enableFollowUp = false) {
+  const tabsEl = document.getElementById('influencerDetailTabs');
+  if (!tabsEl) return;
+  const followUpTab = tabsEl.querySelector('[data-tab="followup"]');
+  if (followUpTab) followUpTab.classList.toggle('hidden', !enableFollowUp);
+  tabsEl.classList.toggle('hidden', !enableFollowUp);
+}
+
+function switchInfluencerDetailTab(tab, enableFollowUp = false) {
+  const resolved = normalizeInfluencerDetailTab(tab, enableFollowUp);
   document.querySelectorAll('#influencerDetailTabs .erp-tab').forEach((el) => {
-    el.classList.toggle('active', el.dataset.tab === tab);
+    el.classList.toggle('active', el.dataset.tab === resolved);
   });
-  document.getElementById('detailAuditContent')?.classList.toggle('hidden', tab !== 'audit');
-  document.getElementById('detailCollabContent')?.classList.toggle('hidden', tab !== 'collab');
-  document.getElementById('detailFollowUpContent')?.classList.toggle('hidden', tab !== 'followup');
+  document.getElementById('detailAuditContent')?.classList.toggle('hidden', resolved !== 'detail');
+  document.getElementById('detailCollabContent')?.classList.add('hidden');
+  document.getElementById('detailFollowUpContent')?.classList.toggle('hidden', resolved !== 'followup');
 }
 
 function bindInfluencerDetailModal() {
@@ -2749,7 +2830,8 @@ function bindInfluencerDetailModal() {
   document.getElementById('influencerDetailTabs')?.addEventListener('click', (e) => {
     const tab = e.target.closest('.erp-tab');
     if (!tab) return;
-    switchInfluencerDetailTab(tab.dataset.tab);
+    const modal = document.getElementById('detailModal');
+    switchInfluencerDetailTab(tab.dataset.tab, !!modal?.__detailContext?.enableFollowUp);
   });
   document.getElementById('detailModal')?.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
@@ -2874,10 +2956,10 @@ async function loadInfluencerDetailContent({
   const auditEl = document.getElementById('detailAuditContent');
   const collabEl = document.getElementById('detailCollabContent');
   const followUpEl = document.getElementById('detailFollowUpContent');
-  if (!modal || !auditEl || !collabEl) return influencerId;
+  if (!modal || !auditEl) return influencerId;
 
   auditEl.innerHTML = '<div class="erp-empty" style="grid-column:1/-1;">加载中...</div>';
-  collabEl.innerHTML = '<div class="erp-empty" style="grid-column:1/-1;">加载中...</div>';
+  if (collabEl) collabEl.innerHTML = '';
   if (followUpEl && enableFollowUp) {
     followUpEl.innerHTML = '<div class="erp-empty">加载中...</div>';
   }
@@ -2888,14 +2970,13 @@ async function loadInfluencerDetailContent({
     resolvedInfluencerId = String(auditRecords[0].influencer_id).trim();
   }
   const renameLogs = await fetchInfluencerIdRenameLogs(resolvedInfluencerId);
-  auditEl.innerHTML = renderInfluencerAuditDetailHtml(auditRecords, renameLogs);
 
   const collab =
     collabRow && String(collabRow.influencer_id || '').trim()
       ? { ...collabRow, influencer_id: resolvedInfluencerId }
       : await fetchCollabRowForDetail(resolvedInfluencerId);
   if (collab) collab.influencer_id = resolvedInfluencerId;
-  collabEl.innerHTML = renderInfluencerCollabDetailHtml(collab, renameLogs);
+  auditEl.innerHTML = renderInfluencerMergedDetailHtml(auditRecords, collab, renameLogs);
 
   if (enableFollowUp && followUpEl) {
     await loadAndRenderFollowUps(resolvedInfluencerId);
@@ -2970,7 +3051,7 @@ async function saveInfluencerIdFromDetail(button) {
 async function showInfluencerDetailModal({
   recordId = null,
   influencerId = '',
-  defaultTab = 'audit',
+  defaultTab = 'detail',
   collabRow = null,
   enableFollowUp = false,
 } = {}) {
@@ -2978,19 +3059,13 @@ async function showInfluencerDetailModal({
 
   const modal = document.getElementById('detailModal');
   const auditEl = document.getElementById('detailAuditContent');
-  const collabEl = document.getElementById('detailCollabContent');
   const followUpEl = document.getElementById('detailFollowUpContent');
-  if (!modal || !auditEl || !collabEl) return;
+  if (!modal || !auditEl) return;
 
-  const resolvedDefaultTab =
-    defaultTab === 'followup' && enableFollowUp
-      ? 'followup'
-      : defaultTab === 'collab'
-        ? 'collab'
-        : 'audit';
-  switchInfluencerDetailTab(resolvedDefaultTab);
+  configureInfluencerDetailTabs(enableFollowUp);
+  const resolvedDefaultTab = normalizeInfluencerDetailTab(defaultTab, enableFollowUp);
+  switchInfluencerDetailTab(resolvedDefaultTab, enableFollowUp);
   auditEl.innerHTML = '<div class="erp-empty" style="grid-column:1/-1;">加载中...</div>';
-  collabEl.innerHTML = '<div class="erp-empty" style="grid-column:1/-1;">加载中...</div>';
   if (followUpEl) {
     followUpEl.innerHTML = enableFollowUp
       ? '<div class="erp-empty">加载中...</div>'
@@ -3014,7 +3089,6 @@ async function showInfluencerDetailModal({
     modal.__detailContext.influencerId = resolvedInfluencerId;
   } catch (err) {
     auditEl.innerHTML = '<div class="erp-empty" style="grid-column:1/-1;">加载失败</div>';
-    collabEl.innerHTML = '<div class="erp-empty" style="grid-column:1/-1;">加载失败</div>';
     if (followUpEl && enableFollowUp) {
       followUpEl.innerHTML = '<div class="erp-empty">加载失败</div>';
     }

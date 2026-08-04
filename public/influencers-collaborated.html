@@ -209,8 +209,7 @@
 
               <div class="erp-modal-body">
                 <div class="erp-tabs erp-detail-modal-tabs" id="influencerDetailTabs">
-                  <button type="button" class="erp-tab active" data-tab="audit">审核信息</button>
-                  <button type="button" class="erp-tab" data-tab="collab">合作信息</button>
+                  <button type="button" class="erp-tab active" data-tab="detail">达人详情</button>
                   <button type="button" class="erp-tab" data-tab="followup">跟进记录</button>
                 </div>
                 <div id="detailAuditContent" class="erp-detail-stack"></div>
@@ -640,7 +639,18 @@
 
       const trendBtn = `<button type="button" class="erp-trend-btn" data-influencer-id="${escapeAttr(key)}" title="月度出单对比" aria-label="月度出单对比"><span class="erp-trend-icon" aria-hidden="true"></span></button>`;
 
-      return `<span class="erp-influencer-id-wrap"><span class="erp-influencer-id-cell">${linkHtml}${trendBtn}${renderPinButton(id, row.pinned)}</span>${renderInfluencerEmailInline(key, row.email, row)}</span>`;
+      const badge = renderInfluencerApplicationCountBadge(
+        {
+          id: row.record_id,
+          record_id: row.record_id,
+          influencer_id: id,
+          influencer_application_count: row.influencer_application_count,
+          influencer_mixed_audit: row.influencer_mixed_audit,
+        },
+        { minCount: 1 }
+      );
+
+      return `<span class="erp-influencer-id-wrap"><span class="erp-influencer-id-cell">${linkHtml}${trendBtn}${renderPinButton(id, row.pinned)}</span>${badge}${renderInfluencerEmailInline(key, row.email, row)}</span>`;
 
     }
 
@@ -1397,7 +1407,7 @@
 
             influencerId: btn.dataset.influencerId,
 
-            defaultTab: 'collab',
+            defaultTab: 'detail',
 
             collabRow: recordsCache.get(String(btn.dataset.influencerId)),
 
@@ -1407,6 +1417,21 @@
 
         });
 
+      });
+
+      document.querySelectorAll('.erp-audit-app-badge').forEach((badge) => {
+        badge.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const influencerId = badge.dataset.influencerId;
+          showInfluencerDetailModal({
+            recordId: badge.dataset.recordId ? Number(badge.dataset.recordId) : null,
+            influencerId,
+            defaultTab: 'detail',
+            collabRow: recordsCache.get(String(influencerId)),
+            enableFollowUp: true,
+          });
+        });
       });
 
       document.querySelectorAll('.erp-follow-up-open').forEach((btn) => {

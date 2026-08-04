@@ -25,7 +25,7 @@
     let currentTab = 'pending';
     let currentPage = 1;
     let totalPages = 1;
-    let sortField = 'import_batch_time';
+    let sortField = 'audit_status_at';
     let sortOrder = 'desc';
     let applyPinSort = true;
     let selectedFile = null;
@@ -113,7 +113,7 @@
                   </th>
                   <th class="erp-sortable" data-sort="influencer_id">达人id <span class="erp-sort-indicator" data-field="influencer_id">↕</span></th><th class="cell-tags">标签</th><th class="cell-assignee">负责人</th><th>粉丝数</th><th>预计发布率</th><th>成交金额</th><th>平均视频播放量</th><th class="cell-model">型号</th>
                   <th class="erp-sortable" data-sort="commission">佣金率 <span class="erp-sort-indicator" data-field="commission">↕</span></th>
-                  <th class="cell-audit">审核</th><th class="cell-audit-reason">审核原因</th><th>备注</th><th class="erp-sortable cell-import-time" data-sort="import_batch_time">导入时间 <span class="erp-sort-indicator" data-field="import_batch_time">↕</span></th><th class="cell-sample-date">寄样日期</th><th>操作</th>
+                  <th class="cell-audit">审核</th><th class="cell-audit-reason">审核原因</th><th>备注</th><th class="erp-sortable cell-import-time" data-sort="audit_status_at">最近审核时间 <span class="erp-sort-indicator" data-field="audit_status_at">↕</span></th><th class="cell-sample-date">寄样日期</th><th>操作</th>
                 </tr></thead>
                 <tbody id="recordTableBody"><tr><td colspan="${COLUMN_COUNT}" class="erp-empty">加载中...</td></tr></tbody>
               </table>
@@ -130,9 +130,8 @@
             <div class="erp-modal erp-modal-wide">
               <div class="erp-modal-header">达人详情</div>
               <div class="erp-modal-body">
-                <div class="erp-tabs erp-detail-modal-tabs" id="influencerDetailTabs">
-                  <button type="button" class="erp-tab active" data-tab="audit">审核信息</button>
-                  <button type="button" class="erp-tab" data-tab="collab">合作信息</button>
+                <div class="erp-tabs erp-detail-modal-tabs hidden" id="influencerDetailTabs">
+                  <button type="button" class="erp-tab active" data-tab="detail">达人详情</button>
                 </div>
                 <div id="detailAuditContent" class="erp-detail-stack"></div>
                 <div id="detailCollabContent" class="erp-detail-grid hidden"></div>
@@ -409,11 +408,52 @@
       return formatImportTimeValue(value);
     }
 
-    function renderImportTimeCell(record) {
-      if (record.import_batch_time) {
-        return escapeHtml(formatImportTimeValue(record.import_batch_time));
-      }
-      return escapeHtml(formatDateTime(record.create_time));
+    function renderLatestAuditTimeCell(record) {
+      const times = [];
+      const push = (value) => {
+        const text = String(value || '').trim().replace('T', ' ').slice(0, 19);
+        if (text) times.push(text);
+      };
+      push(record?.audit_status_at);
+      (record?.influencer_applications || []).forEach((app) => push(app.audit_status_at));
+      times.sort((a, b) => b.localeCompare(a));
+      if (!times.length) return '-';
+      return escapeHtml(formatImportTimeValue(times[0]));
+    }
+
+    function getLatestAuditTimeSortKey(record) {
+      const times = [];
+      const push = (value) => {
+        const text = String(value || '').trim().replace('T', ' ').slice(0, 19);
+        if (text) times.push(text);
+      };
+      push(record?.audit_status_at);
+      (record?.influencer_applications || []).forEach((app) => push(app.audit_status_at));
+      times.sort((a, b) => b.localeCompare(a));
+      return times[0] || '';
+    }
+
+    function cacheInfluencerAuditApps(record) {
+      const count = Number(record.influencer_application_count) || 0;
+      if (count <= 1) return;
+      influencerAuditAppsCache.set(String(record.influencer_id), record.influencer_applications || []);
+    }
+
+    function renderInfluencerIdCellWithBadge(record) {
+      const idCell = renderInfluencerIdCell(record.influencer_id, record.pinned, renderInfluencerLink, {
+        isCollaborated: !!record.is_collaborated,
+      });
+      const badge = renderInfluencerApplicationCountBadge(record, { minCount: 2 });
+      const email = renderInfluencerEmailInline(record.influencer_id, record.email, record);
+      return `<span class="erp-influencer-id-wrap">${idCell}${badge}${email}</span>`;
+    }
+
+    function openInfluencerDetailFromList(recordId, influencerId) {
+      showInfluencerDetailModal({
+        recordId: recordId ? Number(recordId) : null,
+        influencerId: influencerId || '',
+        defaultTab: 'detail',
+      });
     }
 
     async function loadFilterOptions() {
@@ -535,51 +575,6 @@
       return renderSampleDateListCell(record);
     }
 
-    function cacheInfluencerAuditApps(record) {
-      if (!record?.influencer_id) return;
-      const count = Number(record.influencer_application_count) || 0;
-      if (count <= 1) return;
-      influencerAuditAppsCache.set(String(record.influencer_id), record.influencer_applications || []);
-    }
-
-    function getApplicationCountBadgeTitle(record) {
-      const count = Number(record?.influencer_application_count) || 0;
-      if (count <= 1) return '';
-      if (record.influencer_mixed_audit) {
-        return `${count} 条申请，含不同审核状态，点击查看明细`;
-      }
-      const statusLabel = record.influencer_applications?.[0]?.audit_status_label || '同一状态';
-      return `${count} 条申请，均为${statusLabel}，点击查看明细`;
-    }
-
-    function renderInfluencerApplicationCountBadge(record) {
-      const count = Number(record?.influencer_application_count) || 0;
-      if (count <= 1) return '';
-      const mixed = Boolean(record?.influencer_mixed_audit);
-      const title = getApplicationCountBadgeTitle(record);
-      const toneClass = mixed ? 'erp-audit-app-badge--mixed' : 'erp-audit-app-badge--same';
-      return `<button type="button" class="erp-audit-app-badge ${toneClass}" data-influencer-id="${escapeAttr(String(record.influencer_id || ''))}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">${count}</button>`;
-    }
-
-    function renderInfluencerIdCellWithBadge(record) {
-      const idCell = renderInfluencerIdCell(record.influencer_id, record.pinned, renderInfluencerLink);
-      const badge = renderInfluencerApplicationCountBadge(record);
-      const email = renderInfluencerEmailInline(record.influencer_id, record.email, record);
-      if (!badge) return `<span class="erp-influencer-id-wrap">${idCell}${email}</span>`;
-      return `<span class="erp-influencer-id-wrap">${idCell}${badge}${email}</span>`;
-    }
-
-    function showAuditApplicationsModal(influencerId) {
-      const applications = influencerAuditAppsCache.get(String(influencerId || '')) || [];
-      document.getElementById('auditAppsModalTitle').textContent = `申请明细 - ${influencerId || '-'}`;
-      document.getElementById('auditAppsModalBody').innerHTML = renderAuditApplicationsTableHtml(applications);
-      document.getElementById('auditAppsModal').classList.remove('hidden');
-    }
-
-    function closeAuditApplicationsModal() {
-      document.getElementById('auditAppsModal').classList.add('hidden');
-    }
-
     function renderAssigneeCell(record) {
       const text = record.assignee || '-';
       const cls = record.assignee_conflict ? ' assignee-conflict' : '';
@@ -623,7 +618,7 @@
         <td class="cell-audit">${renderEditableInput(record.id, 'audit_status', record.audit_status, { narrow: true })}</td>
         <td class="cell-audit-reason">${renderEditableInput(record.id, 'audit_reason', record.audit_reason, { showTooltip: true })}</td>
         <td>${renderEditableInput(record.id, 'remark', record.remark)}</td>
-        <td class="cell-import-time">${renderImportTimeCell(record)}</td>
+        <td class="cell-import-time">${renderLatestAuditTimeCell(record)}</td>
         <td class="cell-sample-date">${renderPendingAuditSampleDateCell(record, groupKey)}</td>
         <td><button type="button" class="erp-btn erp-btn-secondary erp-btn-view view-detail-btn" data-id="${record.id}">查看</button></td>
       </tr>`;
@@ -664,8 +659,11 @@
         const av = parsePercentNumber(a.commission) ?? -1;
         const bv = parsePercentNumber(b.commission) ?? -1;
         if (av !== bv) return dir * (av - bv);
-      } else {
+      } else if (field === 'import_batch_time') {
         const cmp = getImportTimeSortKey(a).localeCompare(getImportTimeSortKey(b));
+        if (cmp !== 0) return dir * cmp;
+      } else {
+        const cmp = getLatestAuditTimeSortKey(a).localeCompare(getLatestAuditTimeSortKey(b));
         if (cmp !== 0) return dir * cmp;
       }
       return Number(b.id || 0) - Number(a.id || 0);
@@ -673,10 +671,12 @@
 
     function renderGroupHeader(influencerId, count, groupKey, mixedAudit, pinned = 0, record = null) {
       const idCell = record
-        ? renderInfluencerIdCell(record.influencer_id, record.pinned, renderInfluencerLink)
+        ? renderInfluencerIdCell(record.influencer_id, record.pinned, renderInfluencerLink, {
+            isCollaborated: !!record.is_collaborated,
+          })
         : renderInfluencerIdCell(influencerId, pinned, renderInfluencerLink);
       if (record) recordsCache.set(String(record.id), record);
-      const badge = record ? renderInfluencerApplicationCountBadge(record) : '';
+      const badge = record ? renderInfluencerApplicationCountBadge(record, { minCount: 2 }) : '';
       const email = record ? renderInfluencerEmailInline(record.influencer_id, record.email, record) : '';
       const emptyCells = Array.from({ length: GROUP_HEADER_MIDDLE_AFTER_TAGS }, () => '<td class="erp-group-header-empty"></td>').join('');
       const tagsCell = record
@@ -790,7 +790,7 @@
         urlSampleDateTo = '';
         urlAuditDateFrom = '';
         urlAuditDateTo = '';
-        sortField = 'import_batch_time';
+        sortField = 'audit_status_at';
         sortOrder = 'desc';
         applyPinSort = true;
         currentPage = 1;
@@ -801,7 +801,7 @@
       document.getElementById('exportBtn')?.addEventListener('click', () => { window.location.href = `/api/export${buildQueryString(getFilters())}`; });
       document.getElementById('prevPageBtn').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadRecords(); } });
       document.getElementById('nextPageBtn').addEventListener('click', () => { if (currentPage < totalPages) { currentPage++; loadRecords(); } });
-      ['influencer_id', 'import_batch_time', 'commission'].forEach((field) => {
+      ['influencer_id', 'audit_status_at', 'commission'].forEach((field) => {
         document.querySelector(`.erp-sort-indicator[data-field="${field}"]`)?.closest('th')?.addEventListener('click', () => toggleSort(field));
       });
       document.getElementById('auditTabs').addEventListener('click', (e) => {
@@ -814,16 +814,12 @@
         loadRecords();
       });
       document.getElementById('detailCloseBtn').addEventListener('click', () => document.getElementById('detailModal').classList.add('hidden'));
-      document.getElementById('auditAppsModalCloseBtn').addEventListener('click', closeAuditApplicationsModal);
-      document.getElementById('auditAppsModal').addEventListener('click', (e) => {
-        if (e.target.id === 'auditAppsModal') closeAuditApplicationsModal();
-      });
       document.getElementById('recordTableBody').addEventListener('click', (e) => {
         const badge = e.target.closest('.erp-audit-app-badge');
         if (!badge) return;
         e.preventDefault();
         e.stopPropagation();
-        showAuditApplicationsModal(badge.dataset.influencerId);
+        openInfluencerDetailFromList(badge.dataset.recordId, badge.dataset.influencerId);
       });
       document.getElementById('importCloseBtn').addEventListener('click', () => { document.getElementById('importModal').classList.add('hidden'); loadFilterOptions(); loadRecords(); });
       document.getElementById('filterInfluencerId').addEventListener('keydown', (e) => { if (e.key === 'Enter') { currentPage = 1; resetSelection(false); loadRecords(); } });
@@ -1118,11 +1114,7 @@
       }));
       document.querySelectorAll('.view-detail-btn').forEach((btn) => btn.addEventListener('click', () => {
         const record = recordsCache.get(String(btn.dataset.id));
-        showInfluencerDetailModal({
-          recordId: Number(btn.dataset.id),
-          influencerId: record?.influencer_id || btn.dataset.influencerId || '',
-          defaultTab: 'audit',
-        });
+        openInfluencerDetailFromList(btn.dataset.id, record?.influencer_id || btn.dataset.influencerId || '');
       }));
       bindRowCheckboxEvents();
       syncRowCheckboxes();

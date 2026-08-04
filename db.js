@@ -592,13 +592,21 @@ function enrichRecordsWithMergedTags(rows) {
   return enrichRecordsWithMergedFields(rows);
 }
 
+function getRealCollaboratedInfluencerKeySet() {
+  const sampleBuyerMap = getAllSampleOrderBuyerIdMap();
+  const aggMap = buildAllianceOrderStatsByInfluencerKey();
+  const recordMap = getMergedRecordSummaryByInfluencer();
+  return collectRealCollaboratedInfluencerKeys({ sampleBuyerMap, aggMap, recordMap });
+}
+
 function enrichRecordsWithMergedFields(rows) {
   const tagMap = getInfluencerMergedTagsMap();
   const metaMap = buildInfluencerMetaMapForStats();
   const auditSummaryMap = getInfluencerApplicationAuditSummaryMap();
   const sampleOrderMaps = buildSampleOrderIndexMaps();
+  const collaboratedKeys = getRealCollaboratedInfluencerKeySet();
   return (rows || []).map((row) =>
-    enrichRecordWithMergedFields(row, tagMap, metaMap, auditSummaryMap, sampleOrderMaps)
+    enrichRecordWithMergedFields(row, tagMap, metaMap, auditSummaryMap, sampleOrderMaps, collaboratedKeys)
   );
 }
 
@@ -606,22 +614,21 @@ function enrichRecordWithMergedTags(row) {
   return enrichRecordWithMergedFields(row);
 }
 
-function enrichRecordWithMergedFields(row, tagMap, metaMap, auditSummaryMap, sampleOrderMaps) {
+function enrichRecordWithMergedFields(row, tagMap, metaMap, auditSummaryMap, sampleOrderMaps, collaboratedKeys) {
   if (!row) return row;
   const tagsMap = tagMap || getInfluencerMergedTagsMap();
-  row.tags = tagsMap.get(resolveCanonicalInfluencerKey(row.influencer_id)) || '';
+  const canonicalKey = resolveCanonicalInfluencerKey(row.influencer_id);
+  row.tags = tagsMap.get(canonicalKey) || '';
   const meta = getInfluencerMetaForStats(
     metaMap || buildInfluencerMetaMapForStats(),
-    resolveCanonicalInfluencerKey(row.influencer_id),
+    canonicalKey,
     row.influencer_id
   );
   const info = resolveInfluencerAssigneeInfo(meta.assignees);
   row.assignee_names = info.assignee_names;
   row.assignee_conflict = info.assignee_conflict;
   row.assignee = info.assignee;
-  const auditSummary = (auditSummaryMap || getInfluencerApplicationAuditSummaryMap()).get(
-    resolveCanonicalInfluencerKey(row.influencer_id)
-  );
+  const auditSummary = (auditSummaryMap || getInfluencerApplicationAuditSummaryMap()).get(canonicalKey);
   if (auditSummary) {
     row.influencer_mixed_audit = auditSummary.has_mixed_audit_status;
     row.influencer_application_count = auditSummary.application_count;
@@ -631,10 +638,12 @@ function enrichRecordWithMergedFields(row, tagMap, metaMap, auditSummaryMap, sam
     row.influencer_application_count = 0;
     row.influencer_applications = [];
   }
-  row.email = getInfluencerEmailMap().get(resolveCanonicalInfluencerKey(row.influencer_id)) || '';
+  const collabKeys = collaboratedKeys || getRealCollaboratedInfluencerKeySet();
+  row.is_collaborated = !!canonicalKey && collabKeys.has(canonicalKey);
+  row.email = getInfluencerEmailMap().get(canonicalKey) || '';
   applyEmailSendSummaryToRow(
     row,
-    getLatestEmailSendSummaryMap().get(resolveCanonicalInfluencerKey(row.influencer_id))
+    getLatestEmailSendSummaryMap().get(canonicalKey)
   );
 
   const maps = sampleOrderMaps || buildSampleOrderIndexMaps();
@@ -1392,11 +1401,12 @@ function getOrderClause(filters = {}, prefix = '') {
   const col = (name) => colName(name, prefix);
   const pinOrder = 'COALESCE(ip.pinned, 0) DESC, COALESCE(ip.pinned_at, \'\') DESC';
   const pinPrefix = shouldApplyPinSort(filters) ? `${pinOrder}, ` : '';
-  const validFields = ['import_batch_time', 'influencer_id', 'commission'];
-  const sortField = validFields.includes(filters.sort_field) ? filters.sort_field : 'import_batch_time';
+  const validFields = ['import_batch_time', 'audit_status_at', 'influencer_id', 'commission'];
+  const sortField = validFields.includes(filters.sort_field) ? filters.sort_field : 'audit_status_at';
   const direction = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
   const importTimeSort = `COALESCE(NULLIF(TRIM(${col('import_batch_time')}), ''), ${col('create_time')})`;
-  const tieBreak = `${importTimeSort} DESC, ${col('influencer_id')} ASC, ${col('create_time')} DESC`;
+  const auditTimeSort = `COALESCE(NULLIF(TRIM(${col('audit_status_at')}), ''), '')`;
+  const tieBreak = `${auditTimeSort} DESC, ${col('influencer_id')} ASC, ${col('create_time')} DESC`;
 
   if (sortField === 'commission') {
     return `
@@ -1413,7 +1423,11 @@ function getOrderClause(filters = {}, prefix = '') {
     return `ORDER BY ${pinPrefix}${col('influencer_id')} ${direction}, ${tieBreak}`;
   }
 
-  return `ORDER BY ${pinPrefix}${importTimeSort} ${direction}, ${col('influencer_id')} ASC, ${col('create_time')} DESC`;
+  if (sortField === 'import_batch_time') {
+    return `ORDER BY ${pinPrefix}${importTimeSort} ${direction}, ${col('influencer_id')} ASC, ${col('create_time')} DESC`;
+  }
+
+  return `ORDER BY ${pinPrefix}${auditTimeSort} ${direction}, ${col('influencer_id')} ASC, ${col('create_time')} DESC`;
 }
 
 function countMatchingRecords(filters = {}) {
@@ -1436,11 +1450,12 @@ function getInfluencerOrderByClause(filters = {}) {
   const pinPrefix = shouldApplyPinSort(filters)
     ? 'MAX(COALESCE(ip.pinned, 0)) DESC, MAX(COALESCE(ip.pinned_at, \'\')) DESC, '
     : '';
-  const validFields = ['import_batch_time', 'influencer_id', 'commission'];
-  const sortField = validFields.includes(filters.sort_field) ? filters.sort_field : 'import_batch_time';
+  const validFields = ['import_batch_time', 'audit_status_at', 'influencer_id', 'commission'];
+  const sortField = validFields.includes(filters.sort_field) ? filters.sort_field : 'audit_status_at';
   const direction = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
   const importTimeSort = `COALESCE(NULLIF(TRIM(${col('import_batch_time')}), ''), ${col('create_time')})`;
-  const tieBreak = `MAX(${importTimeSort}) DESC, r.influencer_id ASC`;
+  const auditTimeSort = `COALESCE(NULLIF(TRIM(${col('audit_status_at')}), ''), '')`;
+  const tieBreak = `MAX(${auditTimeSort}) DESC, r.influencer_id ASC`;
 
   if (sortField === 'commission') {
     const commExpr = `CASE
@@ -1454,7 +1469,11 @@ function getInfluencerOrderByClause(filters = {}) {
     return `${pinPrefix}r.influencer_id ${direction}, ${tieBreak}`;
   }
 
-  return `${pinPrefix}MAX(${importTimeSort}) ${direction}, r.influencer_id ASC`;
+  if (sortField === 'import_batch_time') {
+    return `${pinPrefix}MAX(${importTimeSort}) ${direction}, r.influencer_id ASC`;
+  }
+
+  return `${pinPrefix}MAX(${auditTimeSort}) ${direction}, r.influencer_id ASC`;
 }
 
 function getPagedInfluencerIds(filters = {}, limit, offset) {
@@ -5019,6 +5038,7 @@ function buildCollaboratedRows(filters = {}) {
   const followUpSummaryMap = getInfluencerFollowUpSummaryMap();
   const emailSendMap = getLatestEmailSendSummaryMap();
   const videoMap = buildInfluencerVideoStatsByCreatorKey();
+  const auditSummaryMap = getInfluencerApplicationAuditSummaryMap();
   const allKeys = collectRealCollaboratedInfluencerKeys({ sampleBuyerMap, aggMap, recordMap });
   const groupedKeys = groupNormalizedKeysByCanonical(allKeys, sampleBuyerMap, allianceCreatorMap);
 
@@ -5051,6 +5071,8 @@ function buildCollaboratedRows(filters = {}) {
     const sendSummary = emailSendMap.get(canonicalKey) || aliasKeys.map((key) => emailSendMap.get(key)).find(Boolean);
     const followSummary =
       followUpSummaryMap.get(canonicalKey) || aliasKeys.map((key) => followUpSummaryMap.get(key)).find(Boolean);
+    const auditSummary =
+      auditSummaryMap.get(canonicalKey) || aliasKeys.map((key) => auditSummaryMap.get(key)).find(Boolean);
     return {
       influencer_id,
       published_video_count: mergePublishedVideoCount(videoMap, aliasKeys),
@@ -5078,6 +5100,8 @@ function buildCollaboratedRows(filters = {}) {
       follow_up_count: followSummary?.follow_up_count || 0,
       latest_follow_up: followSummary?.latest_follow_up || '',
       latest_follow_up_at: followSummary?.latest_follow_up_at || '',
+      influencer_application_count: auditSummary?.application_count || 0,
+      influencer_mixed_audit: !!auditSummary?.has_mixed_audit_status,
     };
   });
 
