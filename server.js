@@ -302,6 +302,11 @@ function toCellValue(value) {
   return String(value).trim();
 }
 
+function toTruthyFlag(value) {
+  const text = toCellValue(value).toLowerCase();
+  return text === '1' || text === 'true' || text === 'yes';
+}
+
 function scoreSpreadsheetDataRows(rows) {
   const sample = rows[1] || rows[0] || [];
   return sample.filter((cell) => String(cell ?? '').trim() !== '').length;
@@ -1244,7 +1249,7 @@ app.get('/api/collaborated/filter-options', requireAuth, async (req, res) => {
 app.get('/api/assignee-stats', requireAuth, async (req, res) => {
   try {
     const filters = {
-      include_allocation_tag: toCellValue(req.query.include_allocation_tag) === '1',
+      include_allocation_tag: toTruthyFlag(req.query.include_allocation_tag),
     };
     if (!isManager(req.user)) {
       filters.scope_assignee = req.user.name;
@@ -1262,7 +1267,7 @@ app.get('/api/sample-shipment-stats', requireAuth, async (req, res) => {
     const filters = {
       date_from: toCellValue(req.query.date_from),
       date_to: toCellValue(req.query.date_to),
-      include_allocation_tag: toCellValue(req.query.include_allocation_tag) === '1',
+      include_allocation_tag: toTruthyFlag(req.query.include_allocation_tag),
     };
     const stats = await getSampleShipmentStats(filters);
     res.json({ success: true, ...stats });
@@ -2047,8 +2052,8 @@ app.get('/api/sample-orders', requireAuth, async (req, res) => {
       assignee_filter: toCellValue(req.query.assignee),
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
-      stats_aligned: toCellValue(req.query.stats_aligned) === '1',
-      include_allocation_tag: toCellValue(req.query.include_allocation_tag) === '1',
+      stats_aligned: toTruthyFlag(req.query.stats_aligned),
+      include_allocation_tag: toTruthyFlag(req.query.include_allocation_tag),
       import_time: toCellValue(req.query.import_time),
       highlight_ids: toCellValue(req.query.highlight_ids),
       page: Math.max(1, parseInt(req.query.page, 10) || 1),
@@ -2082,8 +2087,8 @@ app.get('/api/sample-orders/filter-options', requireAuth, async (req, res) => {
       assignee_filter: toCellValue(req.query.assignee),
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
-      stats_aligned: toCellValue(req.query.stats_aligned) === '1',
-      include_allocation_tag: toCellValue(req.query.include_allocation_tag) === '1',
+      stats_aligned: toTruthyFlag(req.query.stats_aligned),
+      include_allocation_tag: toTruthyFlag(req.query.include_allocation_tag),
     };
     if (!isManager(req.user)) {
       filters.scope_assignee = req.user.name;
