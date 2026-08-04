@@ -2894,7 +2894,7 @@ function bindInfluencerDetailModal() {
 
 async function fetchAuditRecordsForDetail({ recordId, influencerId }) {
   let resolvedId = String(influencerId || '').trim();
-  if (recordId) {
+  if (!resolvedId && recordId) {
     const { res, data } = await api(`/api/records/${recordId}`);
     if (res.ok && data.data?.influencer_id) {
       resolvedId = String(data.data.influencer_id).trim();
@@ -2909,13 +2909,8 @@ async function fetchAuditRecordsForDetail({ recordId, influencerId }) {
 async function fetchCollabRowForDetail(influencerId) {
   const id = String(influencerId || '').trim();
   if (!id) return null;
-  const params = new URLSearchParams({
-    influencer_id: id,
-    collab_tab: 'all',
-    pageSize: '1',
-  });
-  const { res, data } = await api(`/api/collaborated-stats?${params.toString()}`);
-  if (!res.ok || !Array.isArray(data.data) || !data.data.length) {
+  const { res, data } = await api(`/api/collaborated-row/${encodeURIComponent(id)}`);
+  if (!res.ok || !data.data) {
     return {
       influencer_id: id,
       published_video_count: 0,
@@ -2927,9 +2922,10 @@ async function fetchCollabRowForDetail(influencerId) {
       influencer_remark: '',
       tags: '',
       sample_date: '',
+      sample_dates: [],
     };
   }
-  return data.data[0];
+  return data.data;
 }
 
 function setInfluencerDetailStatus(statusEl, message, hidden = false) {
@@ -2944,6 +2940,17 @@ async function fetchInfluencerIdRenameLogs(influencerId) {
   const { res, data } = await api(`/api/influencer-profiles/${encodeURIComponent(id)}/rename-logs`);
   if (!res.ok) return [];
   return data.data || [];
+}
+
+async function resolveInfluencerIdForDetail({ recordId = null, influencerId = '' } = {}) {
+  let resolvedId = String(influencerId || '').trim();
+  if (resolvedId) return resolvedId;
+  if (!recordId) return '';
+  const { res, data } = await api(`/api/records/${recordId}`);
+  if (res.ok && data.data?.influencer_id) {
+    return String(data.data.influencer_id).trim();
+  }
+  return '';
 }
 
 async function loadInfluencerDetailContent({
@@ -2964,22 +2971,39 @@ async function loadInfluencerDetailContent({
     followUpEl.innerHTML = '<div class="erp-empty">加载中...</div>';
   }
 
-  let resolvedInfluencerId = String(influencerId || '').trim();
-  const auditRecords = await fetchAuditRecordsForDetail({ recordId, influencerId: resolvedInfluencerId });
-  if (auditRecords[0]?.influencer_id) {
-    resolvedInfluencerId = String(auditRecords[0].influencer_id).trim();
+  let resolvedInfluencerId = await resolveInfluencerIdForDetail({ recordId, influencerId });
+  if (!resolvedInfluencerId) {
+    auditEl.innerHTML = '<div class="erp-empty" style="grid-column:1/-1;">暂无达人信息</div>';
+    return '';
   }
-  const renameLogs = await fetchInfluencerIdRenameLogs(resolvedInfluencerId);
 
+  const params = new URLSearchParams();
+  if (enableFollowUp) params.set('include_follow_ups', '1');
+  const qs = params.toString();
+  const { res, data } = await api(
+    `/api/influencer-detail/${encodeURIComponent(resolvedInfluencerId)}${qs ? `?${qs}` : ''}`
+  );
+  if (!res.ok) throw new Error(data.message || '加载达人详情失败');
+
+  const payload = data.data || {};
+  resolvedInfluencerId = String(payload.influencer_id || resolvedInfluencerId).trim();
+  const auditRecords = payload.records || [];
+  const renameLogs = payload.rename_logs || [];
   const collab =
     collabRow && String(collabRow.influencer_id || '').trim()
       ? { ...collabRow, influencer_id: resolvedInfluencerId }
-      : await fetchCollabRowForDetail(resolvedInfluencerId);
+      : payload.collab || (await fetchCollabRowForDetail(resolvedInfluencerId));
   if (collab) collab.influencer_id = resolvedInfluencerId;
   auditEl.innerHTML = renderInfluencerMergedDetailHtml(auditRecords, collab, renameLogs);
 
   if (enableFollowUp && followUpEl) {
-    await loadAndRenderFollowUps(resolvedInfluencerId);
+    if (Array.isArray(payload.follow_ups)) {
+      followUpEl.innerHTML = renderFollowUpPanel(resolvedInfluencerId, payload.follow_ups, {
+        canDelete: isManager(),
+      });
+    } else {
+      await loadAndRenderFollowUps(resolvedInfluencerId);
+    }
   }
 
   modal.dataset.influencerId = resolvedInfluencerId;

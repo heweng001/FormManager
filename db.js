@@ -599,14 +599,36 @@ function getRealCollaboratedInfluencerKeySet() {
   return collectRealCollaboratedInfluencerKeys({ sampleBuyerMap, aggMap, recordMap });
 }
 
-function enrichRecordsWithMergedFields(rows) {
+function enrichRecordsWithMergedFields(rows, options = {}) {
+  const list = rows || [];
+  if (!list.length) return [];
+  if (options.light && options.influencerId) {
+    return enrichRecordsForInfluencerDetail(list, options.influencerId);
+  }
   const tagMap = getInfluencerMergedTagsMap();
   const metaMap = buildInfluencerMetaMapForStats();
-  const auditSummaryMap = getInfluencerApplicationAuditSummaryMap();
-  const sampleOrderMaps = buildSampleOrderIndexMaps();
-  const collaboratedKeys = getRealCollaboratedInfluencerKeySet();
-  return (rows || []).map((row) =>
-    enrichRecordWithMergedFields(row, tagMap, metaMap, auditSummaryMap, sampleOrderMaps, collaboratedKeys)
+  const auditSummaryMap = options.skipAuditSummary
+    ? null
+    : getInfluencerApplicationAuditSummaryMap();
+  const sampleOrderMaps = options.sampleOrderMaps || buildSampleOrderIndexMaps();
+  const collaboratedKeys = options.skipCollaboratedFlag
+    ? new Set()
+    : getRealCollaboratedInfluencerKeySet();
+  const emailMap = getInfluencerEmailMap();
+  const emailSendMap = getLatestEmailSendSummaryMap();
+  const skuModelMap = getSkuModelLookupMap();
+  return list.map((row) =>
+    enrichRecordWithMergedFields(
+      row,
+      tagMap,
+      metaMap,
+      auditSummaryMap,
+      sampleOrderMaps,
+      collaboratedKeys,
+      emailMap,
+      emailSendMap,
+      skuModelMap
+    )
   );
 }
 
@@ -614,7 +636,17 @@ function enrichRecordWithMergedTags(row) {
   return enrichRecordWithMergedFields(row);
 }
 
-function enrichRecordWithMergedFields(row, tagMap, metaMap, auditSummaryMap, sampleOrderMaps, collaboratedKeys) {
+function enrichRecordWithMergedFields(
+  row,
+  tagMap,
+  metaMap,
+  auditSummaryMap,
+  sampleOrderMaps,
+  collaboratedKeys,
+  emailMap,
+  emailSendMap,
+  skuModelMap
+) {
   if (!row) return row;
   const tagsMap = tagMap || getInfluencerMergedTagsMap();
   const canonicalKey = resolveCanonicalInfluencerKey(row.influencer_id);
@@ -628,7 +660,9 @@ function enrichRecordWithMergedFields(row, tagMap, metaMap, auditSummaryMap, sam
   row.assignee_names = info.assignee_names;
   row.assignee_conflict = info.assignee_conflict;
   row.assignee = info.assignee;
-  const auditSummary = (auditSummaryMap || getInfluencerApplicationAuditSummaryMap()).get(canonicalKey);
+  const auditSummary = auditSummaryMap
+    ? auditSummaryMap.get(canonicalKey)
+    : null;
   if (auditSummary) {
     row.influencer_mixed_audit = auditSummary.has_mixed_audit_status;
     row.influencer_application_count = auditSummary.application_count;
@@ -640,20 +674,20 @@ function enrichRecordWithMergedFields(row, tagMap, metaMap, auditSummaryMap, sam
   }
   const collabKeys = collaboratedKeys || getRealCollaboratedInfluencerKeySet();
   row.is_collaborated = !!canonicalKey && collabKeys.has(canonicalKey);
-  row.email = getInfluencerEmailMap().get(canonicalKey) || '';
+  row.email = (emailMap || getInfluencerEmailMap()).get(canonicalKey) || '';
   applyEmailSendSummaryToRow(
     row,
-    getLatestEmailSendSummaryMap().get(canonicalKey)
+    (emailSendMap || getLatestEmailSendSummaryMap()).get(canonicalKey)
   );
 
   const maps = sampleOrderMaps || buildSampleOrderIndexMaps();
-  const skuModelMap = getSkuModelLookupMap();
+  const modelMap = skuModelMap || getSkuModelLookupMap();
   const aliasKeys = getInfluencerAliasKeys(row.influencer_id);
   const buyerOrders = collectSampleOrdersForInfluencer(maps, row.influencer_id);
   const skuOrders = collectMapListValues(maps.byBuyerSku, aliasKeys, sampleOrderItemKey).filter(
     (item) => normalizeMatchKey(item.sku_id) === normalizeMatchKey(row.sku_id)
   );
-  const duplicateGroups = aliasKeys.flatMap((key) => buildSameModelDuplicateGroups(key, maps, skuModelMap));
+  const duplicateGroups = aliasKeys.flatMap((key) => buildSameModelDuplicateGroups(key, maps, modelMap));
   const duplicateGroupMap = new Map();
   duplicateGroups.forEach((group) => {
     const groupKey = `${group.sku_id}|${group.model_name}|${group.count}`;
@@ -1816,18 +1850,19 @@ function getRecordsByInfluencerId(influencerId, filters = {}) {
   if (filters.scope_assignee) {
     appendInfluencerAssigneeFilter(conditions, params, 'r.influencer_id', filters.scope_assignee);
   }
-  const rows = enrichRecordsWithMergedFields(
-    queryRows(
-      `
+  const rows = queryRows(
+    `
       SELECT ${recordsSelectFields('r')}
       ${recordsFromJoin()}
       WHERE ${conditions.join(' AND ')}
       ORDER BY COALESCE(NULLIF(TRIM(r.import_batch_time), ''), r.create_time) DESC, r.id DESC
       `,
-      params
-    )
+    params
   );
-  return Promise.resolve(rows);
+  const enriched = filters.light
+    ? enrichRecordsWithMergedFields(rows, { light: true, influencerId: id })
+    : enrichRecordsWithMergedFields(rows);
+  return Promise.resolve(enriched);
 }
 
 function getInfluencerFollowUpSummaryMap() {
@@ -5199,18 +5234,218 @@ function getCollaboratedMonthRangesBeijing() {
 }
 
 function findAllianceCreatorNamesForInfluencer(influencerId) {
-  const keys = new Set(getInfluencerAliasKeys(influencerId));
-  if (!keys.size) return [];
-  const rows = queryRows(
-    `SELECT DISTINCT creator_username FROM alliance_orders WHERE TRIM(COALESCE(creator_username, '')) != ''`
-  );
-  const names = rows
-    .map((row) => row.creator_username)
-    .filter((name) => keys.has(normalizeMatchKey(name)));
-  if (!names.length && String(influencerId || '').trim()) {
-    return [resolveCanonicalInfluencerId(influencerId)];
+  const names = getInfluencerAliasDisplayValues(influencerId);
+  if (!names.length) return [];
+  const keys = new Set(names.map((name) => normalizeMatchKey(name)).filter(Boolean));
+  if (!keys.size) return names;
+  const placeholders = [...keys].map(() => '?').join(', ');
+  const matched = queryRows(
+    `
+    SELECT DISTINCT creator_username
+    FROM alliance_orders
+    WHERE LOWER(TRIM(creator_username)) IN (${placeholders})
+    `,
+    [...keys]
+  )
+    .map((row) => String(row.creator_username || '').trim())
+    .filter(Boolean);
+  if (matched.length) return matched;
+  const fallback = resolveCanonicalInfluencerId(influencerId);
+  return fallback ? [fallback] : names;
+}
+
+function buildSampleOrderIndexMapsForInfluencer(influencerId) {
+  const byBuyerSku = new Map();
+  const byBuyer = new Map();
+  const keys = getInfluencerAliasKeys(influencerId);
+  if (!keys.length) return { byBuyerSku, byBuyer };
+  const placeholders = keys.map(() => '?').join(', ');
+  queryRows(
+    `
+    SELECT id, buyer_username, sku_id, created_time_ymd, created_time_raw
+    FROM sample_orders
+    WHERE LOWER(TRIM(COALESCE(buyer_username, ''))) IN (${placeholders})
+      AND TRIM(COALESCE(sku_id, '')) != ''
+    `,
+    keys
+  ).forEach((order) => {
+    const date = resolveSampleOrderYmd(order);
+    if (!date) return;
+    const item = { date, sample_order_id: order.id, sku_id: String(order.sku_id || '').trim() };
+    const buyerKey = normalizeMatchKey(order.buyer_username);
+    const skuKey = `${buyerKey}|${normalizeMatchKey(order.sku_id)}`;
+    if (!byBuyerSku.has(skuKey)) byBuyerSku.set(skuKey, []);
+    byBuyerSku.get(skuKey).push(item);
+    if (!byBuyer.has(buyerKey)) byBuyer.set(buyerKey, []);
+    byBuyer.get(buyerKey).push(item);
+  });
+  const sortItems = (items) =>
+    items.sort(
+      (a, b) =>
+        String(b.date).localeCompare(String(a.date)) ||
+        Number(b.sample_order_id) - Number(a.sample_order_id)
+    );
+  byBuyerSku.forEach((items, key) => byBuyerSku.set(key, sortItems(items)));
+  byBuyer.forEach((items, key) => byBuyer.set(key, sortItems(items)));
+  return { byBuyerSku, byBuyer };
+}
+
+function resolveAssigneeInfoForInfluencer(influencerId, profile = null) {
+  const assigneeSet = new Set(splitAssigneeList(profile?.assignee));
+  const conditions = [];
+  const params = [];
+  appendInfluencerIdSqlFilter(conditions, params, 'influencer_id', influencerId);
+  if (conditions.length) {
+    queryRows(
+      `
+      SELECT assignee
+      FROM records
+      WHERE ${conditions.join(' AND ')}
+        AND TRIM(COALESCE(assignee, '')) != ''
+      `,
+      params
+    ).forEach((row) => {
+      splitAssigneeList(row.assignee).forEach((name) => assigneeSet.add(name));
+    });
   }
-  return names;
+  return resolveInfluencerAssigneeInfo([...assigneeSet]);
+}
+
+function getCollaboratedRowForInfluencer(influencerId) {
+  const id = resolveCanonicalInfluencerId(influencerId);
+  if (!id) return null;
+  const displayValues = getInfluencerAliasDisplayValues(id);
+  const profile = queryOne(
+    `
+    SELECT influencer_id, tags, assignee, influencer_remark, fulfillment_progress, email, pinned, pinned_at
+    FROM influencer_profiles
+    WHERE influencer_id = ?
+    `,
+    [id]
+  );
+  const assigneeInfo = resolveAssigneeInfoForInfluencer(id, profile);
+  const allianceNames = findAllianceCreatorNamesForInfluencer(id);
+  const agg = aggregateAllianceOrderStatsAllTime(allianceNames.length ? allianceNames : displayValues);
+  const sampleMaps = buildSampleOrderIndexMapsForInfluencer(id);
+  const sample_dates = collectSampleOrdersForInfluencer(sampleMaps, id);
+  const sample_order_count = sample_dates.length;
+  return {
+    influencer_id: id,
+    published_video_count: countPublishedVideosForCreatorNames(displayValues),
+    video_count: agg.video_count || 0,
+    order_count: agg.order_count || 0,
+    refund_count: agg.refund_count || 0,
+    tags: profile?.tags ? normalizeTagsValue(profile.tags) : '',
+    assignee: assigneeInfo.assignee,
+    assignee_names: assigneeInfo.assignee_names,
+    assignee_conflict: assigneeInfo.assignee_conflict,
+    influencer_remark: profile?.influencer_remark || '',
+    email: profile?.email || '',
+    fulfillment_progress: profile?.fulfillment_progress || '',
+    pinned: profile && Number(profile.pinned) === 1 ? 1 : 0,
+    pinned_at: profile?.pinned_at || '',
+    sample_date: sample_dates.map((item) => item.date).join('、'),
+    sample_dates,
+    sample_order_count,
+    has_duplicate_sample: sample_order_count > 1,
+    sample_order_id: sample_dates[0]?.sample_order_id || null,
+    record_id: null,
+  };
+}
+
+function enrichRecordsForInfluencerDetail(rows, influencerId) {
+  const list = rows || [];
+  if (!list.length) return [];
+  const id = resolveCanonicalInfluencerId(influencerId) || String(influencerId || '').trim();
+  const profile = queryOne(
+    `
+    SELECT influencer_id, tags, assignee, email
+    FROM influencer_profiles
+    WHERE influencer_id = ?
+    `,
+    [id]
+  );
+  const assigneeInfo = resolveAssigneeInfoForInfluencer(id, profile);
+  const tags = profile?.tags ? normalizeTagsValue(profile.tags) : '';
+  const email = profile?.email || '';
+  const sampleOrderMaps = buildSampleOrderIndexMapsForInfluencer(id);
+  const skuModelMap = getSkuModelLookupMap();
+  const aliasKeys = getInfluencerAliasKeys(id);
+  const buyerOrders = collectSampleOrdersForInfluencer(sampleOrderMaps, id);
+  const duplicateGroups = aliasKeys.flatMap((key) =>
+    buildSameModelDuplicateGroups(key, sampleOrderMaps, skuModelMap)
+  );
+  const duplicateGroupMap = new Map();
+  duplicateGroups.forEach((group) => {
+    const groupKey = `${group.sku_id}|${group.model_name}|${group.count}`;
+    if (!duplicateGroupMap.has(groupKey)) duplicateGroupMap.set(groupKey, group);
+  });
+  const mergedDuplicateGroups = [...duplicateGroupMap.values()].sort((a, b) =>
+    String(b.sample_dates[0]?.date || '').localeCompare(String(a.sample_dates[0]?.date || ''))
+  );
+
+  return list.map((row) => {
+    const skuOrders = collectMapListValues(sampleOrderMaps.byBuyerSku, aliasKeys, sampleOrderItemKey).filter(
+      (item) => normalizeMatchKey(item.sku_id) === normalizeMatchKey(row.sku_id)
+    );
+    row.tags = tags;
+    row.assignee_names = assigneeInfo.assignee_names;
+    row.assignee_conflict = assigneeInfo.assignee_conflict;
+    row.assignee = assigneeInfo.assignee || row.assignee || '';
+    row.email = email;
+    row.influencer_mixed_audit = false;
+    row.influencer_application_count = list.length;
+    row.influencer_applications = [];
+    row.is_collaborated = false;
+    row.influencer_sample_dates = buyerOrders;
+    row.influencer_sample_order_count = buyerOrders.length;
+    row.influencer_same_model_duplicate_groups = mergedDuplicateGroups;
+    row.influencer_same_model_duplicate_count = mergedDuplicateGroups.reduce(
+      (sum, group) => sum + group.count,
+      0
+    );
+    row.application_sample_dates = skuOrders;
+    row.application_sample_order_count = skuOrders.length;
+    row.sample_dates = skuOrders;
+    row.sample_order_count = skuOrders.length;
+    row.sample_date = skuOrders[0]?.date || '';
+    row.sample_order_id = skuOrders[0]?.sample_order_id || null;
+    row.has_duplicate_sample = skuOrders.length > 1;
+    return row;
+  });
+}
+
+function getInfluencerDetailPayload(influencerId, options = {}) {
+  const id = resolveCanonicalInfluencerId(influencerId) || String(influencerId || '').trim();
+  if (!id) {
+    return Promise.resolve({
+      influencer_id: '',
+      records: [],
+      collab: null,
+      rename_logs: [],
+      follow_ups: [],
+    });
+  }
+  // Access is enforced by the route; skip assignee-scope SQL here to avoid full meta-map rebuild.
+  return getRecordsByInfluencerId(id, { light: true }).then((records) => {
+    const collab = getCollaboratedRowForInfluencer(id);
+    return getInfluencerIdRenameLogs(id).then((renameLogs) => {
+      const payload = {
+        influencer_id: id,
+        records: records || [],
+        collab,
+        rename_logs: renameLogs || [],
+      };
+      if (!options.include_follow_ups) {
+        payload.follow_ups = [];
+        return payload;
+      }
+      return getInfluencerFollowUps(id).then((followUps) => {
+        payload.follow_ups = followUps || [];
+        return payload;
+      });
+    });
+  });
 }
 
 function mergeCollaboratedSampleDates(recordDates = [], sampleOrder = {}) {
@@ -6255,6 +6490,8 @@ module.exports = {
   splitTagsValue,
   getRecordById,
   getRecordsByInfluencerId,
+  getInfluencerDetailPayload,
+  getCollaboratedRowForInfluencer,
   getInfluencerFollowUps,
   insertInfluencerFollowUp,
   deleteInfluencerFollowUp,

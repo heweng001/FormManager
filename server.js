@@ -43,6 +43,8 @@ const {
   getAuditTabCounts,
   getRecordById,
   getRecordsByInfluencerId,
+  getInfluencerDetailPayload,
+  getCollaboratedRowForInfluencer,
   getInfluencerFollowUps,
   insertInfluencerFollowUp,
   deleteInfluencerFollowUp,
@@ -957,13 +959,51 @@ app.get('/api/influencer-records/:influencerId', requireAuth, async (req, res) =
     if (!isManager(req.user) && !canStaffAccessInfluencerAssignee(influencerId, req.user.name)) {
       return res.status(403).json({ success: false, message: '无权限查看此达人' });
     }
-    const filters = {};
+    const filters = { light: true };
     if (!isManager(req.user)) filters.scope_assignee = req.user.name;
     const rows = await getRecordsByInfluencerId(influencerId, filters);
     res.json({ success: true, data: rows });
   } catch (err) {
     console.error('获取达人审核信息失败:', err);
     res.status(500).json({ success: false, message: '获取审核信息失败' });
+  }
+});
+
+app.get('/api/influencer-detail/:influencerId', requireAuth, async (req, res) => {
+  const influencerId = decodeURIComponent(toCellValue(req.params.influencerId));
+  if (!influencerId) {
+    return res.status(400).json({ success: false, message: '达人 id 不能为空' });
+  }
+  try {
+    if (!isManager(req.user) && !canStaffAccessInfluencerAssignee(influencerId, req.user.name)) {
+      return res.status(403).json({ success: false, message: '无权限查看此达人' });
+    }
+    const options = {
+      include_follow_ups: toTruthyFlag(req.query.include_follow_ups),
+    };
+    if (!isManager(req.user)) options.scope_assignee = req.user.name;
+    const data = await getInfluencerDetailPayload(influencerId, options);
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error('获取达人详情失败:', err);
+    res.status(500).json({ success: false, message: '获取达人详情失败' });
+  }
+});
+
+app.get('/api/collaborated-row/:influencerId', requireAuth, async (req, res) => {
+  const influencerId = decodeURIComponent(toCellValue(req.params.influencerId));
+  if (!influencerId) {
+    return res.status(400).json({ success: false, message: '达人 id 不能为空' });
+  }
+  try {
+    if (!isManager(req.user) && !canStaffAccessInfluencerAssignee(influencerId, req.user.name)) {
+      return res.status(403).json({ success: false, message: '无权限查看此达人' });
+    }
+    const row = getCollaboratedRowForInfluencer(influencerId);
+    res.json({ success: true, data: row });
+  } catch (err) {
+    console.error('获取达人合作信息失败:', err);
+    res.status(500).json({ success: false, message: '获取合作信息失败' });
   }
 });
 
