@@ -34,7 +34,7 @@
         meta: '联盟订单导入与查询',
         content: `
           <div class="erp-page-header erp-page-header-compact">
-            <h1 class="erp-page-title erp-page-title-inline">联盟订单<span class="erp-page-desc-inline"> — 导入第 1、2、4、5、6、8、9、11、12、14、16、21、27、28、29 列，订单 id 唯一且重复覆盖</span></h1>
+            <h1 class="erp-page-title erp-page-title-inline">联盟订单<span class="erp-page-desc-inline"> — 导入第 1、2、4、6、9、11、12、14、16、21、27 列，订单 id 唯一且重复覆盖</span></h1>
           </div>
           <div id="lastImportBanner"></div>
           <div class="erp-card erp-card-compact" style="margin-bottom:8px;">
@@ -60,8 +60,9 @@
                     fileColumnCount: ALLIANCE_ORDER_FILE_COLUMN_COUNT,
                     hideFieldKeys: true,
                     notes: [
-                      '请上传 TikTok 联盟订单原始导出文件，保持完整 29 列结构，勿删列、勿改列序。',
+                      '请上传 TikTok 联盟订单原始导出文件，保持完整 29 列结构，勿删列、勿改列序；系统仅读取上述列。',
                       '订单 id（Excel 第 1 列）为唯一标识；相同订单 id 重复导入时将覆盖已有记录。',
+                      '支付时间（第 27 列）导入时会解析为 yyyy/mm/dd HH:mm(:ss) 格式存储与展示。',
                     ],
                   })}
                   <input type="file" id="fileInput" accept="${IMPORT_FILE_ACCEPT}" style="display:none" />

@@ -7,18 +7,16 @@ const SAMPLE_ORDER_SOURCE_COLUMNS = [1, 3, 6, 8, 30, 33, 45];
 const SAMPLE_ORDER_SKIP_HEADER_ROWS = 2;
 const SAMPLE_ORDER_DATA_START_ROW = 3;
 
-/** 联盟订单：TikTok 原始导出共 29 列；其中导入第 1、2、4、5、6、8、9、11、12、14、16、21、27、28、29 列 */
+/** 联盟订单：TikTok 原始导出共 29 列；导入第 1、2、4、6、9、11、12、14、16、21、27 列（不含 5、8、28、29） */
 const ALLIANCE_ORDER_FILE_COLUMN_COUNT = 29;
-const ALLIANCE_ORDER_COLUMN_INDEXES = [0, 1, 3, 4, 5, 7, 8, 10, 11, 13, 15, 20, 26, 27, 28];
-const ALLIANCE_ORDER_SOURCE_COLUMNS = [1, 2, 4, 5, 6, 8, 9, 11, 12, 14, 16, 21, 27, 28, 29];
+const ALLIANCE_ORDER_COLUMN_INDEXES = [0, 1, 3, 5, 8, 10, 11, 13, 15, 20, 26];
+const ALLIANCE_ORDER_SOURCE_COLUMNS = [1, 2, 4, 6, 9, 11, 12, 14, 16, 21, 27];
 
 const ALLIANCE_ORDER_COLUMNS = [
   { key: 'order_id', label: '订单id', legacyAliases: ['订单id', '订单 ID', 'Order ID', 'order id', 'unique_key'] },
   { key: 'product_id', label: '商品id', legacyAliases: ['商品id', '商品 ID', 'Product ID', 'product_id'] },
   { key: 'sku_id', label: 'skuID', legacyAliases: ['SKU ID', 'Sku ID', 'skuid', 'SKU', 'sku_id'] },
-  { key: 'product_price', label: '商品价格', legacyAliases: ['商品价格', 'Product Price', 'product_price'] },
   { key: 'order_amount', label: '支付金额', legacyAliases: ['支付金额', '订单金额', 'Order Amount', 'order_amount'] },
-  { key: 'quantity', label: '下单件数', legacyAliases: ['下单件数', '数量', 'Quantity', 'quantity'] },
   { key: 'full_refund', label: '已全部退款', legacyAliases: ['已全部退款', '全额退款', 'full_refund'] },
   { key: 'order_status', label: '订单状态', legacyAliases: ['订单状态', 'Order Status', 'order_status'] },
   { key: 'creator_username', label: '达人id', legacyAliases: ['达人id', '达人 ID', 'Creator Username', 'creator_username'] },
@@ -26,8 +24,6 @@ const ALLIANCE_ORDER_COLUMNS = [
   { key: 'commission_rate', label: '标准佣金率', legacyAliases: ['标准佣金率', '佣金率', 'Commission Rate', 'commission_rate'] },
   { key: 'ad_commission_rate', label: '广告佣金率', legacyAliases: ['广告佣金率', 'ad_commission_rate'] },
   { key: 'payment_time_raw', label: '支付时间', legacyAliases: ['支付时间', 'Payment Time', 'payment_time_raw'] },
-  { key: 'delivery_time_raw', label: '送达时间', legacyAliases: ['送达时间', 'delivery_time_raw'] },
-  { key: 'settlement_time_raw', label: '佣金结算时间', legacyAliases: ['佣金结算时间', '结算时间', 'settlement_time_raw'] },
 ];
 
 /** 达人视频：忽略前 2 行，从第 3 行起导入第 1–6 列 */

@@ -906,6 +906,7 @@ async function initDatabase() {
   migrateReconcileSampleOrderYmdFromRaw();
   migrateReconcileSampleOrderYmdFromRawV2();
   migrateReconcileAlliancePaymentYmd();
+  migrateClearAllianceOrdersColumnTrimV1();
   migrateInfluencerTagsToProfile();
   migrateStaffMailSettings();
   migrateEmailSendLogs();
@@ -2189,6 +2190,15 @@ function migrateReconcileAlliancePaymentYmd() {
   setAppMeta('alliance_payment_ymd_reconcile_v1', '1');
 }
 
+function migrateClearAllianceOrdersColumnTrimV1() {
+  ensureAppMetaTable();
+  if (getAppMeta('alliance_orders_column_trim_v1') === '1') return;
+  db.run('DELETE FROM alliance_orders');
+  db.run(`DELETE FROM alliance_order_meta WHERE key IN ('headers', 'last_import')`);
+  setAppMeta('alliance_orders_column_trim_v1', '1');
+  saveDb();
+}
+
 function migrateInfluencerTagsToProfile() {
   ensureAppMetaTable();
   if (getAppMeta('influencer_tags_profile_only_v1') === '1') return;
@@ -3227,11 +3237,74 @@ function normalizeYmdInput(value) {
   return parseCreatedTimeToYmd(text);
 }
 
+function pad2DatePart(value) {
+  return String(value ?? '').padStart(2, '0');
+}
+
+function extractTimePartsFromText(text) {
+  const match = String(text || '').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?/i);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = match[3] != null ? Number(match[3]) : null;
+  const ampm = (match[4] || '').toUpperCase();
+  if (ampm === 'PM' && hour < 12) hour += 12;
+  if (ampm === 'AM' && hour === 12) hour = 0;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  if (second != null && (second < 0 || second > 59)) return null;
+  return {
+    hour,
+    minute,
+    second: second == null ? 0 : second,
+    hasSeconds: match[3] != null,
+  };
+}
+
+function formatDisplayDateTimeParts({ year, month, day, hour, minute, second, hasTime, hasSeconds }) {
+  const datePart = `${year}/${pad2DatePart(month)}/${pad2DatePart(day)}`;
+  if (!hasTime) return datePart;
+  const timePart = `${pad2DatePart(hour)}:${pad2DatePart(minute)}`;
+  if (hasSeconds) return `${datePart} ${timePart}:${pad2DatePart(second || 0)}`;
+  return `${datePart} ${timePart}`;
+}
+
+/** 将导入的支付时间规范为 yyyy/mm/dd 或 yyyy/mm/dd HH:mm(:ss) */
+function normalizeImportedDateTimeRaw(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const ymd = parseCreatedTimeToYmd(text);
+  if (!ymd) return text;
+  const time = extractTimePartsFromText(text);
+  return formatDisplayDateTimeParts({
+    year: ymd.slice(0, 4),
+    month: ymd.slice(4, 6),
+    day: ymd.slice(6, 8),
+    hour: time?.hour || 0,
+    minute: time?.minute || 0,
+    second: time?.second || 0,
+    hasTime: Boolean(time),
+    hasSeconds: Boolean(time?.hasSeconds),
+  });
+}
+
+function sanitizeAllianceOrderData(data = {}) {
+  const cleaned = {};
+  ALLIANCE_ORDER_COLUMNS.forEach((column) => {
+    cleaned[column.key] = readOrderFieldFromData(data, column.key, column.legacyAliases || []);
+  });
+  if (cleaned.payment_time_raw) {
+    cleaned.payment_time_raw = normalizeImportedDateTimeRaw(cleaned.payment_time_raw);
+  }
+  return cleaned;
+}
+
 function extractAllianceOrderFields(data) {
   const order_id = readOrderFieldFromData(data, 'order_id', ['订单id', '订单 ID', 'Order ID', 'unique_key']);
   const content_id = readOrderFieldFromData(data, 'content_id', ['内容id', '内容 ID', 'Content ID']);
   const creator_username = readOrderFieldFromData(data, 'creator_username', ['达人id', '达人 ID', 'Creator Username']);
-  const payment_time_raw = readOrderFieldFromData(data, 'payment_time_raw', ['支付时间', 'Payment Time']);
+  const payment_time_raw = normalizeImportedDateTimeRaw(
+    readOrderFieldFromData(data, 'payment_time_raw', ['支付时间', 'Payment Time'])
+  );
   const payment_time_ymd = parseCreatedTimeToYmd(payment_time_raw);
   const full_refund = readOrderFieldFromData(data, 'full_refund', ['已全部退款', '全额退款']);
   const full_return = full_refund;
@@ -3294,7 +3367,8 @@ function findAllianceOrderByUniqueKey(uniqueKey) {
 }
 
 function insertAllianceOrder({ unique_key, data, imported_by, import_time }, options = {}) {
-  const fields = extractAllianceOrderFields(data);
+  const cleanedData = sanitizeAllianceOrderData(data);
+  const fields = extractAllianceOrderFields(cleanedData);
   const resolvedUniqueKey = unique_key || fields.order_id;
   const resolvedImportTime = import_time || formatBeijingDateTime();
   db.run(
@@ -3304,7 +3378,7 @@ function insertAllianceOrder({ unique_key, data, imported_by, import_time }, opt
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       resolvedUniqueKey,
-      JSON.stringify(data || {}),
+      JSON.stringify(cleanedData || {}),
       fields.content_id,
       fields.creator_username,
       fields.order_id,
@@ -3322,7 +3396,8 @@ function insertAllianceOrder({ unique_key, data, imported_by, import_time }, opt
 }
 
 function updateAllianceOrder(id, { unique_key, data, imported_by, import_time }, options = {}) {
-  const fields = extractAllianceOrderFields(data);
+  const cleanedData = sanitizeAllianceOrderData(data);
+  const fields = extractAllianceOrderFields(cleanedData);
   const resolvedUniqueKey = unique_key || fields.order_id;
   const resolvedImportTime = import_time || formatBeijingDateTime();
   db.run(
@@ -3333,7 +3408,7 @@ function updateAllianceOrder(id, { unique_key, data, imported_by, import_time },
      WHERE id = ?`,
     [
       resolvedUniqueKey,
-      JSON.stringify(data || {}),
+      JSON.stringify(cleanedData || {}),
       fields.content_id,
       fields.creator_username,
       fields.order_id,
@@ -3416,16 +3491,21 @@ function rebuildAllianceOrderDerivedFields() {
     } catch {
       data = {};
     }
-    const fields = extractAllianceOrderFields(data);
-    const payment_time_raw = fields.payment_time_raw || row.payment_time_raw || '';
+    if (!data.payment_time_raw && row.payment_time_raw) {
+      data.payment_time_raw = row.payment_time_raw;
+    }
+    const cleaned = sanitizeAllianceOrderData(data);
+    const fields = extractAllianceOrderFields(cleaned);
+    const payment_time_raw = fields.payment_time_raw || '';
     const payment_time_ymd = resolveAlliancePaymentYmd({ payment_time_raw, payment_time_ymd: fields.payment_time_ymd });
     db.run(
       `UPDATE alliance_orders SET
-        content_id = ?, creator_username = ?, order_id = ?,
+        data_json = ?, content_id = ?, creator_username = ?, order_id = ?,
         payment_time_raw = ?, payment_time_ymd = ?,
         full_return = ?, full_refund = ?, is_refund = ?
       WHERE id = ?`,
       [
+        JSON.stringify(cleaned),
         fields.content_id,
         fields.creator_username,
         fields.order_id,
