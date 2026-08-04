@@ -2047,6 +2047,8 @@ app.get('/api/sample-orders', requireAuth, async (req, res) => {
       assignee_filter: toCellValue(req.query.assignee),
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
+      stats_aligned: toCellValue(req.query.stats_aligned) === '1',
+      include_allocation_tag: toCellValue(req.query.include_allocation_tag) === '1',
       import_time: toCellValue(req.query.import_time),
       highlight_ids: toCellValue(req.query.highlight_ids),
       page: Math.max(1, parseInt(req.query.page, 10) || 1),
@@ -2080,6 +2082,8 @@ app.get('/api/sample-orders/filter-options', requireAuth, async (req, res) => {
       assignee_filter: toCellValue(req.query.assignee),
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
+      stats_aligned: toCellValue(req.query.stats_aligned) === '1',
+      include_allocation_tag: toCellValue(req.query.include_allocation_tag) === '1',
     };
     if (!isManager(req.user)) {
       filters.scope_assignee = req.user.name;

@@ -21,6 +21,8 @@
     let urlAssignee = '';
     let urlSampleDateFrom = '';
     let urlSampleDateTo = '';
+    let urlStatsAligned = false;
+    let urlIncludeAllocationTag = false;
     let urlHighlightIds = [];
 
     function getHighlightIds() {
@@ -112,6 +114,8 @@
       urlAssignee = params.get('assignee') || '';
       urlSampleDateFrom = params.get('sample_date_from') || '';
       urlSampleDateTo = params.get('sample_date_to') || '';
+      urlStatsAligned = params.get('stats_aligned') === '1';
+      urlIncludeAllocationTag = params.get('include_allocation_tag') === '1';
       urlHighlightIds = getHighlightIds();
       if (urlSampleDateFrom) document.getElementById('filterSampleDateFrom').value = urlSampleDateFrom;
       if (urlSampleDateTo) document.getElementById('filterSampleDateTo').value = urlSampleDateTo;
@@ -142,6 +146,8 @@
         assignee: urlAssignee,
         sample_date_from: document.getElementById('filterSampleDateFrom').value.trim() || urlSampleDateFrom,
         sample_date_to: document.getElementById('filterSampleDateTo').value.trim() || urlSampleDateTo,
+        stats_aligned: urlStatsAligned,
+        include_allocation_tag: urlIncludeAllocationTag,
         import_time: document.getElementById('filterImportTime').value.trim(),
         highlight_ids: highlightIds.length > 1 ? highlightIds.join(',') : '',
         page: currentPage,

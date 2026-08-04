@@ -201,6 +201,8 @@
       if (assignee) params.set('assignee', assignee);
       params.set('sample_date_from', currentRange.start);
       params.set('sample_date_to', currentRange.end);
+      params.set('stats_aligned', '1');
+      if (includeAllocationTag) params.set('include_allocation_tag', '1');
       return `/sample-orders.html?${params.toString()}`;
     }
 

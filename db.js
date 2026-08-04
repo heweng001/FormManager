@@ -2876,11 +2876,11 @@ function buildSampleOrderWhere(filters = {}) {
       params.push(`%${keyword}%`);
     }
   }
-  if (filters.sample_date_from) {
+  if (filters.sample_date_from && !filters.stats_aligned) {
     conditions.push('TRIM(COALESCE(created_time_ymd, \'\')) >= ?');
     params.push(filters.sample_date_from);
   }
-  if (filters.sample_date_to) {
+  if (filters.sample_date_to && !filters.stats_aligned) {
     conditions.push('TRIM(COALESCE(created_time_ymd, \'\')) <= ?');
     params.push(filters.sample_date_to);
   }
@@ -2901,13 +2901,31 @@ function buildSampleOrderWhere(filters = {}) {
   }
   const assigneeName = filters.assignee_filter || filters.scope_assignee;
   if (assigneeName) {
-    const creators = getCreatorUsernamesForAssignee(assigneeName);
-    if (!creators.length) {
-      conditions.push('1 = 0');
+    if (filters.stats_aligned) {
+      const matches = getSampleOrderIdsMatchingStatsFilters({
+        assignee_filter: assigneeName,
+        sample_date_from: filters.sample_date_from,
+        sample_date_to: filters.sample_date_to,
+        include_allocation_tag: filters.include_allocation_tag,
+        scope_assignee: filters.scope_assignee,
+      });
+      const orderIds = matches.map((item) => item.id).filter(Boolean);
+      if (!orderIds.length) {
+        conditions.push('1 = 0');
+      } else {
+        const placeholders = orderIds.map(() => '?').join(', ');
+        conditions.push(`id IN (${placeholders})`);
+        params.push(...orderIds);
+      }
     } else {
-      const placeholders = creators.map(() => '?').join(', ');
-      conditions.push(`buyer_username IN (${placeholders})`);
-      params.push(...creators);
+      const creators = getCreatorUsernamesForAssignee(assigneeName);
+      if (!creators.length) {
+        conditions.push('1 = 0');
+      } else {
+        const placeholders = creators.map(() => '?').join(', ');
+        conditions.push(`buyer_username IN (${placeholders})`);
+        params.push(...creators);
+      }
     }
   }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -3651,6 +3669,45 @@ function getCreatorUsernamesForAssignee(assigneeName) {
     }
   });
   return [...creators];
+}
+
+function getSampleOrderBuyersMatchingStatsFilters(filters = {}) {
+  return getSampleOrderIdsMatchingStatsFilters(filters).map((item) => item.buyer_username);
+}
+
+function getSampleOrderIdsMatchingStatsFilters(filters = {}) {
+  backfillSampleOrderYmdFromRaw();
+  const start = String(filters.sample_date_from || '').trim();
+  const end = String(filters.sample_date_to || '').trim();
+  if (!start || !end) return [];
+  const metaMap = buildInfluencerMetaMapForStats();
+  const statsFilters = {
+    include_allocation_tag:
+      filters.include_allocation_tag === true ||
+      filters.include_allocation_tag === 1 ||
+      String(filters.include_allocation_tag) === '1',
+    scope_assignee: filters.scope_assignee,
+  };
+  const assignee = filters.assignee_filter;
+  const matches = [];
+  queryRows(
+    `SELECT id, buyer_username, created_time_ymd, created_time_raw
+     FROM sample_orders
+     WHERE TRIM(COALESCE(buyer_username, '')) != ''`
+  ).forEach((order) => {
+    const ymd = resolveSampleOrderYmd(order);
+    if (!ymdInRangeForStats(ymd, start, end)) return;
+    const meta = getInfluencerMetaForStats(metaMap, order.buyer_username, order.buyer_username);
+    if (isAllocationTaggedInfluencerForStats(meta.tags, statsFilters)) return;
+    const assignees = getSampleStatsAssigneeTargets(meta, statsFilters);
+    if (!assignees.length) return;
+    if (assignee && !assignees.includes(assignee)) return;
+    matches.push({
+      id: order.id,
+      buyer_username: String(order.buyer_username).trim(),
+    });
+  });
+  return matches;
 }
 
 function calcApprovalRatePercent(approved, rejected, tentative) {
