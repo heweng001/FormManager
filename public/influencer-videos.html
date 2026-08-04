@@ -11,7 +11,6 @@
   <script src="/js/common.js"></script>
   <script>
     const PAGE_SIZE = 50;
-    const XLSX_ACCEPT = '.xlsx';
     const SORTABLE_FIELDS = ['import_time', 'order_count', 'refund_count'];
     let currentPage = 1;
     let totalPages = 1;
@@ -202,7 +201,7 @@
         meta: '达人视频导入与查询',
         content: `
           <div class="erp-page-header erp-page-header-compact">
-            <h1 class="erp-page-title erp-page-title-inline">达人视频<span class="erp-page-desc-inline"> — 仅支持 .xlsx；忽略前 2 行，从第 3 行起导入第 1–6 列；内容 id（第 2 列）唯一</span></h1>
+            <h1 class="erp-page-title erp-page-title-inline">达人视频</h1>
           </div>
           <div class="erp-card erp-card-compact" style="margin-bottom:8px;">
             <div class="erp-card-body erp-card-body-compact">
@@ -220,17 +219,14 @@
               </div>
               <div id="importPanel" class="erp-import-panel hidden">
                 <div id="dropZone" class="erp-upload-zone compact">
-                  <p class="erp-upload-title">拖拽或点击上传 .xlsx 文件</p>
                   ${renderImportColumnGuideHtml(INFLUENCER_VIDEO_COLUMNS, {
-                    hideFieldKeys: true,
                     skipHeaderRows: INFLUENCER_VIDEO_SKIP_HEADER_ROWS,
                     dataStartRow: INFLUENCER_VIDEO_DATA_START_ROW,
-                    notes: [
-                      '仅支持 .xlsx 格式。',
+                    tips: [
                       '内容 id（第 2 列）为唯一标识，重复记录将跳过。',
                     ],
                   })}
-                  <input type="file" id="fileInput" accept="${XLSX_ACCEPT}" style="display:none" />
+                  <input type="file" id="fileInput" accept="${IMPORT_FILE_ACCEPT}" style="display:none" />
                 </div>
                 <p id="fileName" class="erp-meta hidden-text"></p>
                 <div class="erp-toolbar" style="margin-top:8px;">
@@ -428,13 +424,9 @@
       document.getElementById('uploadBtn').disabled = true;
     }
 
-    function isAllowedXlsxFile(file) {
-      return file && String(file.name || '').toLowerCase().endsWith('.xlsx');
-    }
-
     function handleFile(file) {
       if (!file) return;
-      if (!isAllowedXlsxFile(file)) return alert('仅支持 .xlsx 格式');
+      if (!isAllowedImportFile(file)) return alert(`仅支持 ${IMPORT_FILE_LABEL}`);
       selectedFile = file;
       document.getElementById('fileName').textContent = '已选择：' + file.name;
       document.getElementById('fileName').classList.remove('hidden-text');
@@ -481,8 +473,11 @@
     function bindEvents() {
       document.getElementById('toggleImportBtn').addEventListener('click', () => toggleImportPanel());
       document.getElementById('cancelImportBtn').addEventListener('click', () => { resetImportForm(); toggleImportPanel(false); });
-      document.getElementById('dropZone').addEventListener('click', () => document.getElementById('fileInput').click());
-      document.getElementById('fileInput').addEventListener('change', (e) => handleFile(e.target.files[0]));
+      bindImportDropZone({
+        dropZone: document.getElementById('dropZone'),
+        fileInput: document.getElementById('fileInput'),
+        onFile: handleFile,
+      });
       document.getElementById('uploadBtn').addEventListener('click', uploadFile);
       document.getElementById('batchDeleteBtn').addEventListener('click', submitBatchDelete);
       document.getElementById('searchBtn').addEventListener('click', () => { currentPage = 1; rowSelection.resetSelection(false); loadVideos(); });

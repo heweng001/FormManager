@@ -157,7 +157,7 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-const ALLOWED_IMPORT_EXTENSIONS = new Set(['.xlsx', '.xls', '.csv']);
+const ALLOWED_IMPORT_EXTENSIONS = new Set(['.xlsx']);
 
 function isAllowedImportExtension(filename) {
   return ALLOWED_IMPORT_EXTENSIONS.has(path.extname(filename).toLowerCase());

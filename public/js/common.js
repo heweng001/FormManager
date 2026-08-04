@@ -1,82 +1,124 @@
-const IMPORT_FILE_EXTENSIONS = ['xlsx', 'xls', 'csv'];
-const IMPORT_FILE_ACCEPT = '.xlsx,.xls,.csv';
-const IMPORT_FILE_LABEL = '.xlsx / .xls / .csv';
+const IMPORT_FILE_EXTENSIONS = ['xlsx'];
+const IMPORT_FILE_ACCEPT = '.xlsx';
+const IMPORT_FILE_LABEL = '.xlsx';
+
+function renderImportHelpBadgeHtml(tips = []) {
+  const list = []
+    .concat(tips || [])
+    .flat()
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  if (!list.length) return '';
+  return `
+    <span class="erp-import-help">
+      <span class="erp-import-help-badge" tabindex="0" aria-label="导入说明">说明</span>
+      <div class="erp-import-help-popover" role="tooltip">
+        <p class="erp-import-help-popover-title">导入说明</p>
+        <ul>${list.map((tip) => `<li>${escapeHtml(tip)}</li>`).join('')}</ul>
+      </div>
+    </span>`;
+}
+
+function buildImportGuideAutoTips(options = {}) {
+  const tips = [];
+  const skipRows = Number(options.skipHeaderRows) || 0;
+  const dataStartRow = Number(options.dataStartRow) || 0;
+  if (skipRows > 0 && dataStartRow > 0) {
+    tips.push(`忽略表格前 ${skipRows} 行，从第 ${dataStartRow} 行起读取数据。`);
+  } else {
+    tips.push('忽略第 1 行表头，从第 2 行起读取数据。');
+  }
+  const fileColumnCount = Number(options.fileColumnCount) || 0;
+  if (fileColumnCount > 0) {
+    tips.push(`请使用 TikTok 原始导出文件（共 ${fileColumnCount} 列），勿删列、勿改列序；系统仅读取下表所列列。`);
+  } else {
+    tips.push('请保持文件列顺序与下表一致，勿删列、勿改列序。');
+  }
+  tips.push(`仅支持 ${IMPORT_FILE_LABEL} 格式。`);
+  return tips;
+}
 
 function renderImportColumnGuideHtml(columns, options = {}) {
   const list = columns || [];
   const sourceColumns = options.sourceColumns || [];
-  const hideFieldKeys = options.hideFieldKeys === true;
-  const fileColumnCount = Number(options.fileColumnCount) || 0;
-  const importCount = list.length;
-  const fileColCount = fileColumnCount || (sourceColumns.length ? Math.max(...sourceColumns) : importCount);
-  const title =
-    options.title ||
-    (fileColumnCount && sourceColumns.length
-      ? `列映射说明（TikTok 导出共 ${fileColCount} 列，导入其中 ${importCount} 列）`
-      : `列映射说明（共 ${importCount} 个字段）`);
-  const notes = []
-    .concat(options.notes || [])
+  const manualTips = []
+    .concat(options.tips || options.notes || [])
     .flat()
+    .map((item) => String(item || '').trim())
     .filter(Boolean);
-  const fileColHeader = sourceColumns.length ? 'Excel 列号' : '文件列序';
-  const fieldHeader = sourceColumns.length ? '系统字段' : '列表字段名';
-  const statusHeader = fileColumnCount && sourceColumns.length ? '<th>导入</th>' : '';
-  const keyHeader = hideFieldKeys ? '' : '<th>字段 key</th>';
+  const tips = [...buildImportGuideAutoTips(options), ...manualTips];
+  const rows = list
+    .map((column, index) => {
+      const excelCol = sourceColumns[index] || index + 1;
+      return `<tr>
+        <td class="col-index">第 ${excelCol} 列</td>
+        <td>${escapeHtml(column.label || column.key)}</td>
+        <td class="col-key"><code>${escapeHtml(column.key)}</code></td>
+      </tr>`;
+    })
+    .join('');
 
-  let rows = '';
-  if (fileColumnCount && sourceColumns.length) {
-    const importMap = new Map();
-    list.forEach((column, index) => {
-      const excelCol = sourceColumns[index];
-      if (excelCol) importMap.set(excelCol, column);
-    });
-    rows = Array.from({ length: fileColumnCount }, (_, index) => {
-      const excelCol = index + 1;
-      const column = importMap.get(excelCol);
-      const keyCell = hideFieldKeys
-        ? ''
-        : `<td class="col-key">${column ? `<code>${escapeHtml(column.key)}</code>` : ''}</td>`;
-      if (column) {
-        return `<tr class="import-col-yes"><td class="col-index">第 ${excelCol} 列</td><td>${escapeHtml(column.label || column.key)}</td><td>是</td>${keyCell}</tr>`;
-      }
-      return `<tr class="import-col-skip"><td class="col-index">第 ${excelCol} 列</td><td class="import-col-muted">—</td><td class="import-col-muted">否</td>${keyCell}</tr>`;
-    }).join('');
-  } else {
-    rows = list
-      .map((column, index) => {
-        const fileCol = sourceColumns[index];
-        const fileColLabel = fileCol ? `第 ${fileCol} 列` : `第 ${index + 1} 列`;
-        const keyCell = hideFieldKeys
-          ? ''
-          : `<td class="col-key"><code>${escapeHtml(column.key)}</code></td>`;
-        return `<tr><td class="col-index">${fileColLabel}</td><td>${escapeHtml(column.label || column.key)}</td>${keyCell}</tr>`;
-      })
-      .join('');
-  }
-
-  const intro =
-    options.introHtml ||
-    (Number(options.skipHeaderRows) > 0 && Number(options.dataStartRow) > 0
-      ? sourceColumns.length
-        ? `系统<strong>忽略表格前 ${Number(options.skipHeaderRows)} 行</strong>，从<strong>第 ${Number(options.dataStartRow)} 行</strong>起读取数据；仅导入下表「Excel 列号」所示列，其余列忽略：`
-        : `系统<strong>忽略表格前 ${Number(options.skipHeaderRows)} 行</strong>，从<strong>第 ${Number(options.dataStartRow)} 行</strong>起读取数据；文件列须<strong>从左到右</strong>与下表一致：`
-      : fileColumnCount && sourceColumns.length
-        ? `系统<strong>忽略第 1 行表头</strong>，从<strong>第 2 行</strong>起读取数据。请使用 TikTok 原始导出文件（共 ${fileColCount} 列，勿删列）；下表列出全部列，标记为「是」的 ${importCount} 列会被导入：`
-        : sourceColumns.length
-          ? '系统<strong>忽略第 1 行表头</strong>，从<strong>第 2 行</strong>起读取数据。请使用 TikTok 原始导出文件（勿删列）；仅读取下表「Excel 列号」所示列，其余列忽略：'
-          : '系统<strong>忽略首行</strong>（可保留平台表头）。从<strong>第 2 行</strong>起为数据；文件列须<strong>从左到右</strong>与下表一致：');
   return `
+    <div class="erp-import-upload-header">
+      <p class="erp-upload-title">拖拽或点击上传 ${IMPORT_FILE_LABEL}</p>
+      ${renderImportHelpBadgeHtml(tips)}
+    </div>
     <div class="erp-import-column-guide">
-      <p class="erp-import-column-guide-title">${escapeHtml(title)}</p>
-      <p class="erp-upload-hint">${intro}</p>
+      <p class="erp-upload-hint">将导入以下列与字段：</p>
       <div class="erp-import-column-table-wrap">
         <table class="erp-import-column-table">
-          <thead><tr><th>${fileColHeader}</th><th>${fieldHeader}</th>${statusHeader}${keyHeader}</tr></thead>
+          <thead><tr><th>Excel 列号</th><th>字段名</th><th>字段 key</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
-      ${notes.map((note) => `<p class="erp-upload-hint erp-import-column-note">${escapeHtml(note)}</p>`).join('')}
     </div>`;
+}
+
+function bindImportDropZone({ dropZone, fileInput, onFile }) {
+  if (!dropZone || !fileInput || typeof onFile !== 'function') return;
+
+  const handleFile = (file) => {
+    if (!file) return;
+    if (!isAllowedImportFile(file)) {
+      alert(`仅支持 ${IMPORT_FILE_LABEL}`);
+      return;
+    }
+    onFile(file);
+  };
+
+  dropZone.addEventListener('click', (e) => {
+    if (e.target.closest('.erp-import-help')) return;
+    if (e.target.closest('a, button, input, select, textarea, label')) return;
+    fileInput.click();
+  });
+
+  dropZone.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.add('dragover');
+  });
+  dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.add('dragover');
+  });
+  dropZone.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!dropZone.contains(e.relatedTarget)) {
+      dropZone.classList.remove('dragover');
+    }
+  });
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.remove('dragover');
+    handleFile(e.dataTransfer?.files?.[0]);
+  });
+
+  fileInput.addEventListener('change', (e) => {
+    handleFile(e.target.files?.[0]);
+  });
 }
 
 const FULFILLMENT_PROGRESS_OPTIONS = [

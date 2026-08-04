@@ -792,18 +792,96 @@ input.erp-input.erp-date-input {
   font-size: 12px;
   font-weight: 600;
   color: #334155;
-  margin-bottom: 4px;
+  margin: 0;
+}
+
+.erp-import-upload-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.erp-import-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  z-index: 5;
+}
+
+.erp-import-help-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: help;
+  user-select: none;
+}
+
+.erp-import-help-popover {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(360px, 78vw);
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+  text-align: left;
+  z-index: 30;
+}
+
+.erp-import-help:hover .erp-import-help-popover,
+.erp-import-help:focus-within .erp-import-help-popover {
+  display: block;
+}
+
+.erp-import-help-popover-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e3a8a;
+}
+
+.erp-import-help-popover ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.erp-import-help-popover li {
+  margin: 0 0 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #334155;
+}
+
+.erp-import-help-popover li:last-child {
+  margin-bottom: 0;
 }
 
 .erp-upload-hint {
   font-size: 10px;
   color: #94a3b8;
+  margin: 0 0 8px;
 }
 
 .erp-import-column-guide {
-  margin-top: 10px;
+  margin-top: 4px;
   padding-top: 10px;
   border-top: 1px solid #e2e8f0;
+  text-align: left;
 }
 
 .erp-import-column-guide-title {
@@ -815,12 +893,12 @@ input.erp-input.erp-date-input {
 
 .erp-import-column-table-wrap {
   overflow-x: auto;
-  margin: 8px 0;
-  max-height: 320px;
+  margin: 0;
+  max-height: 240px;
   overflow-y: auto;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
-  background: #f8fafc;
+  background: #fff;
 }
 
 .erp-import-column-table {
@@ -843,6 +921,7 @@ input.erp-input.erp-date-input {
   font-weight: 600;
   position: sticky;
   top: 0;
+  z-index: 1;
 }
 
 .erp-import-column-table td.col-index {
@@ -852,24 +931,14 @@ input.erp-input.erp-date-input {
 
 .erp-import-column-table td.col-key code {
   font-size: 10px;
-  color: #6366f1;
-  background: transparent;
+  color: #0f766e;
+  background: #f0fdfa;
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 .erp-import-column-note {
   margin: 4px 0 0;
-}
-
-.erp-import-column-table tr.import-col-yes td {
-  background: #fff;
-}
-
-.erp-import-column-table tr.import-col-skip td {
-  background: #f8fafc;
-}
-
-.erp-import-column-table td.import-col-muted {
-  color: #94a3b8;
 }
 
 .erp-empty {

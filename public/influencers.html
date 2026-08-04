@@ -74,9 +74,8 @@
               </div>
               <div id="importPanel" class="erp-import-panel hidden">
                 <div id="dropZone" class="erp-upload-zone compact">
-                  <p class="erp-upload-title">拖拽或点击上传 ${IMPORT_FILE_LABEL}</p>
                   ${renderImportColumnGuideHtml(RECORD_IMPORT_COLUMNS, {
-                    notes: [
+                    tips: [
                       '第 10 列「申请 id」为去重依据；重复申请 id 将跳过。',
                       '导入后按佣金率自动分配负责人。',
                     ],
@@ -735,18 +734,16 @@
     }
 
     function bindEvents() {
-      const dropZone = document.getElementById('dropZone');
-      const fileInput = document.getElementById('fileInput');
       document.getElementById('toggleImportBtn').addEventListener('click', () => toggleImportPanel());
       document.getElementById('cancelImportBtn')?.addEventListener('click', () => {
         resetImportForm();
         toggleImportPanel(false);
       });
-      dropZone.addEventListener('click', () => fileInput.click());
-      dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
-      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-      dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFile(e.dataTransfer.files[0]); });
-      fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+      bindImportDropZone({
+        dropZone: document.getElementById('dropZone'),
+        fileInput: document.getElementById('fileInput'),
+        onFile: handleFile,
+      });
       document.getElementById('uploadBtn').addEventListener('click', uploadFile);
       document.getElementById('batchAssignBtn')?.addEventListener('click', openBatchAssignModal);
       document.getElementById('batchDeleteBtn')?.addEventListener('click', submitBatchDelete);
