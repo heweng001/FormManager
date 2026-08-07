@@ -463,11 +463,11 @@ function formatImportedValue(field, value) {
 function buildRecordFilters(query, user) {
   const auditTab = toCellValue(query.audit_tab) || 'pending';
   const validTabs = ['all', 'pending', 'tentative', 'approved', 'rejected'];
-  const validSortFields = ['import_batch_time', 'influencer_id', 'commission'];
+  const validSortFields = ['import_batch_time', 'audit_status_at', 'influencer_id', 'commission'];
   const sortField = toCellValue(query.sort_field);
   const sortOrder = toCellValue(query.sort_order);
   const sortCommission = toCellValue(query.sort_commission);
-  let resolvedSortField = validSortFields.includes(sortField) ? sortField : 'import_batch_time';
+  let resolvedSortField = validSortFields.includes(sortField) ? sortField : 'audit_status_at';
   let resolvedSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
   if (!sortField && ['asc', 'desc'].includes(sortCommission)) {
     resolvedSortField = 'commission';
@@ -1825,6 +1825,10 @@ app.get('/api/alliance-orders', requireAuth, async (req, res) => {
       sample_date_to: toCellValue(req.query.sample_date_to),
       import_time: toCellValue(req.query.import_time),
       full_refund: toCellValue(req.query.full_refund) === '1' ? '1' : '',
+      sort_field: ['payment_time', 'import_time', 'id'].includes(toCellValue(req.query.sort_field))
+        ? toCellValue(req.query.sort_field)
+        : 'payment_time',
+      sort_order: toCellValue(req.query.sort_order) === 'asc' ? 'asc' : 'desc',
       page: Math.max(1, parseInt(req.query.page, 10) || 1),
       pageSize: Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50)),
     };
@@ -2096,6 +2100,10 @@ app.get('/api/sample-orders', requireAuth, async (req, res) => {
       include_allocation_tag: toTruthyFlag(req.query.include_allocation_tag),
       import_time: toCellValue(req.query.import_time),
       highlight_ids: toCellValue(req.query.highlight_ids),
+      sort_field: ['created_time', 'import_time', 'id'].includes(toCellValue(req.query.sort_field))
+        ? toCellValue(req.query.sort_field)
+        : 'created_time',
+      sort_order: toCellValue(req.query.sort_order) === 'asc' ? 'asc' : 'desc',
       page: Math.max(1, parseInt(req.query.page, 10) || 1),
       pageSize: Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 50)),
     };

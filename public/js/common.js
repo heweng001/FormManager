@@ -654,13 +654,45 @@ function renderOrderImportTimeHeader() {
   return `<th class="cell-import-time">导入时间</th>`;
 }
 
-function renderOrderTableHeadHtml(columns = []) {
+function resolveOrderColumnSortKey(column) {
+  if (!column) return '';
+  if (column.key === ORDER_IMPORT_TIME_HEADER) return 'import_time';
+  if (column.sortKey) return column.sortKey;
+  if (column.key === 'payment_time_raw') return 'payment_time';
+  if (column.key === 'created_time_raw') return 'created_time';
+  if (column.key === 'publish_date_raw') return 'publish_date';
+  return column.key;
+}
+
+function renderOrderTableHeadHtml(columns = [], options = {}) {
+  const sortableFields = new Set(options.sortableFields || []);
   return buildOrderDisplayColumns(columns)
     .map((column) => {
+      const sortKey = resolveOrderColumnSortKey(column);
+      const isSortable = sortableFields.has(sortKey) || !!column.sortable;
+      if (isSortable && sortKey) {
+        const label = column.key === ORDER_IMPORT_TIME_HEADER ? '导入时间' : column.label || column.key;
+        const extraClass = column.key === ORDER_IMPORT_TIME_HEADER ? ' cell-import-time' : '';
+        return `<th class="erp-sortable${extraClass}" data-sort="${escapeAttr(sortKey)}">${escapeHtml(label)} <span class="erp-sort-indicator" data-field="${escapeAttr(sortKey)}">↕</span></th>`;
+      }
       if (column.key === ORDER_IMPORT_TIME_HEADER) return renderOrderImportTimeHeader();
       return `<th>${escapeHtml(column.label || column.key)}</th>`;
     })
     .join('');
+}
+
+function bindOrderTableSortHeaders(root, sortableFields, onToggle) {
+  (sortableFields || []).forEach((field) => {
+    root?.querySelector(`.erp-sort-indicator[data-field="${field}"]`)?.closest('th')?.addEventListener('click', () => onToggle(field));
+  });
+}
+
+function updateOrderSortIndicators(root, sortField, sortOrder) {
+  (root || document).querySelectorAll('.erp-sort-indicator').forEach((el) => {
+    const active = el.dataset.field === sortField;
+    el.textContent = active ? (sortOrder === 'asc' ? '↑' : '↓') : '↕';
+    el.classList.toggle('active', active);
+  });
 }
 
 function renderOrderTableCellHtml(row, column, skuModelMap = {}) {

@@ -23,7 +23,7 @@ const ALLIANCE_ORDER_COLUMNS = [
   { key: 'content_id', label: '内容id', legacyAliases: ['内容id', '内容 ID', 'Content ID', 'content_id'] },
   { key: 'commission_rate', label: '标准佣金率', legacyAliases: ['标准佣金率', '佣金率', 'Commission Rate', 'commission_rate'] },
   { key: 'ad_commission_rate', label: '广告佣金率', legacyAliases: ['广告佣金率', 'ad_commission_rate'] },
-  { key: 'payment_time_raw', label: '支付时间', legacyAliases: ['支付时间', 'Payment Time', 'payment_time_raw'] },
+  { key: 'payment_time_raw', label: '支付时间', sortable: true, sortKey: 'payment_time', legacyAliases: ['支付时间', 'Payment Time', 'payment_time_raw'] },
 ];
 
 /** 达人视频：忽略前 2 行，从第 3 行起导入第 1–6 列 */
@@ -33,18 +33,18 @@ const INFLUENCER_VIDEO_DATA_START_ROW = 3;
 const INFLUENCER_VIDEO_COLUMNS = [
   { key: 'video_title', label: '视频标题' },
   { key: 'content_id', label: '内容id', legacyAliases: ['内容id', '内容 ID', 'Content ID', 'content_id'] },
-  { key: 'publish_date_raw', label: '发布日期', legacyAliases: ['发布日期', 'Publish Date', 'publish_date'] },
+  { key: 'publish_date_raw', label: '发布日期', sortable: true, sortKey: 'publish_date', legacyAliases: ['发布日期', 'Publish Date', 'publish_date'] },
   { key: 'video_url', label: '视频链接', legacyAliases: ['视频链接', 'Video URL', 'video_url', '链接'] },
   { key: 'creator_username', label: '达人id', legacyAliases: ['达人id', '达人 ID', 'Creator Username', 'creator_username'] },
   { key: 'product_id', label: '商品id', legacyAliases: ['商品id', '商品 ID', 'Product ID', 'product_id'] },
 ];
 
-const INFLUENCER_VIDEO_SORTABLE_FIELDS = ['import_time', 'order_count', 'refund_count'];
+const INFLUENCER_VIDEO_SORTABLE_FIELDS = ['publish_date', 'import_time', 'order_count', 'refund_count'];
 
 const INFLUENCER_VIDEO_DISPLAY_COLUMNS = [
   ...INFLUENCER_VIDEO_COLUMNS,
-  { key: 'order_count', label: '出单数', sortable: true },
-  { key: 'refund_count', label: '退款数', sortable: true },
+  { key: 'order_count', label: '出单数', sortable: true, sortKey: 'order_count' },
+  { key: 'refund_count', label: '退款数', sortable: true, sortKey: 'refund_count' },
 ];
 
 const SAMPLE_ORDER_COLUMNS = [
@@ -52,10 +52,13 @@ const SAMPLE_ORDER_COLUMNS = [
   { key: 'order_status', label: '订单状态', legacyAliases: ['订单状态', 'Order Status', 'order_status', 'Status', 'status'] },
   { key: 'sku_id', label: 'skuID', legacyAliases: ['skuID', 'SKU ID', 'Sku ID', 'skuid', 'SKU', 'sku_id'] },
   { key: 'product_id', label: '商品id', legacyAliases: ['商品id', '商品 ID', 'Product ID', 'product_id'] },
-  { key: 'created_time_raw', label: '寄样时间', legacyAliases: ['寄样时间', '寄样日期', 'Created Time', 'created time', 'created_time_raw', 'payment_time_raw', '支付时间'] },
+  { key: 'created_time_raw', label: '寄样时间', sortable: true, sortKey: 'created_time', legacyAliases: ['寄样时间', '寄样日期', 'Created Time', 'created time', 'created_time_raw', 'payment_time_raw', '支付时间'] },
   { key: 'received_time_raw', label: '签收时间', legacyAliases: ['签收时间', '送达时间', 'Received Time', 'received_time'] },
   { key: 'buyer_username', label: '达人id', legacyAliases: ['达人id', '达人ID', 'Buyer Username', 'buyer username', 'Creator Username'] },
 ];
+
+const ALLIANCE_ORDER_SORTABLE_FIELDS = ['payment_time', 'import_time'];
+const SAMPLE_ORDER_SORTABLE_FIELDS = ['created_time', 'import_time'];
 
 const RECORD_IMPORT_COLUMNS = [
   { key: 'influencer_id', label: '达人 id' },
@@ -152,8 +155,11 @@ if (typeof module !== 'undefined' && module.exports) {
     ALLIANCE_ORDER_COLUMNS,
     INFLUENCER_VIDEO_COLUMNS,
     INFLUENCER_VIDEO_DISPLAY_COLUMNS,
+    INFLUENCER_VIDEO_SORTABLE_FIELDS,
     INFLUENCER_VIDEO_SKIP_HEADER_ROWS,
     INFLUENCER_VIDEO_DATA_START_ROW,
+    ALLIANCE_ORDER_SORTABLE_FIELDS,
+    SAMPLE_ORDER_SORTABLE_FIELDS,
     RECORD_IMPORT_COLUMNS,
     normalizeOrderFieldKey,
     pickOrderDataField,
@@ -179,8 +185,11 @@ if (typeof window !== 'undefined') {
   window.ALLIANCE_ORDER_COLUMNS = ALLIANCE_ORDER_COLUMNS;
   window.INFLUENCER_VIDEO_COLUMNS = INFLUENCER_VIDEO_COLUMNS;
   window.INFLUENCER_VIDEO_DISPLAY_COLUMNS = INFLUENCER_VIDEO_DISPLAY_COLUMNS;
+  window.INFLUENCER_VIDEO_SORTABLE_FIELDS = INFLUENCER_VIDEO_SORTABLE_FIELDS;
   window.INFLUENCER_VIDEO_SKIP_HEADER_ROWS = INFLUENCER_VIDEO_SKIP_HEADER_ROWS;
   window.INFLUENCER_VIDEO_DATA_START_ROW = INFLUENCER_VIDEO_DATA_START_ROW;
+  window.ALLIANCE_ORDER_SORTABLE_FIELDS = ALLIANCE_ORDER_SORTABLE_FIELDS;
+  window.SAMPLE_ORDER_SORTABLE_FIELDS = SAMPLE_ORDER_SORTABLE_FIELDS;
   window.RECORD_IMPORT_COLUMNS = RECORD_IMPORT_COLUMNS;
   window.readOrderCellValue = readOrderCellValue;
 }

@@ -11,8 +11,11 @@
   <script src="/js/common.js"></script>
   <script>
     const PAGE_SIZE = 50;
+    const SORTABLE_FIELDS = ALLIANCE_ORDER_SORTABLE_FIELDS || ['payment_time', 'import_time'];
     let currentPage = 1;
     let totalPages = 1;
+    let sortField = 'payment_time';
+    let sortOrder = 'desc';
     const tableColumns = ALLIANCE_ORDER_COLUMNS;
     let skuModelMap = {};
     let selectedFile = null;
@@ -141,6 +144,8 @@
         payment_to: document.getElementById('filterPaymentTo').value.trim() || urlPaymentTo,
         full_refund: urlFullRefund,
         import_time: document.getElementById('filterImportTime').value.trim(),
+        sort_field: sortField,
+        sort_order: sortOrder,
         page: currentPage,
         pageSize: PAGE_SIZE,
       };
@@ -155,10 +160,23 @@
       return q ? `?${q}` : '';
     }
 
+    function toggleSort(field) {
+      if (sortField === field) sortOrder = sortOrder === 'desc' ? 'asc' : 'desc';
+      else {
+        sortField = field;
+        sortOrder = 'desc';
+      }
+      currentPage = 1;
+      rowSelection.resetSelection(false);
+      loadOrders();
+    }
+
     function renderTableHead() {
       const thead = document.getElementById('allianceOrderHead');
-      thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}${renderOrderTableHeadHtml(tableColumns)}</tr>`;
+      thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}${renderOrderTableHeadHtml(tableColumns, { sortableFields: SORTABLE_FIELDS })}</tr>`;
       rowSelection.setupSelectAllMenu();
+      bindOrderTableSortHeaders(thead, SORTABLE_FIELDS, toggleSort);
+      updateOrderSortIndicators(thead, sortField, sortOrder);
     }
 
     function renderTableBody(rows) {
@@ -318,6 +336,9 @@
         urlSampleDateTo = '';
         urlPaymentFrom = '';
         urlPaymentTo = '';
+        urlFullRefund = '';
+        sortField = 'payment_time';
+        sortOrder = 'desc';
         currentPage = 1;
         rowSelection.resetSelection(false);
         loadOrders();

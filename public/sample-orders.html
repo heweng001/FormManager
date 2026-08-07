@@ -11,8 +11,11 @@
   <script src="/js/common.js"></script>
   <script>
     const PAGE_SIZE = 50;
+    const SORTABLE_FIELDS = SAMPLE_ORDER_SORTABLE_FIELDS || ['created_time', 'import_time'];
     let currentPage = 1;
     let totalPages = 1;
+    let sortField = 'created_time';
+    let sortOrder = 'desc';
     const tableColumns = SAMPLE_ORDER_COLUMNS;
     let skuModelMap = {};
     let selectedFile = null;
@@ -149,6 +152,8 @@
         include_allocation_tag: urlIncludeAllocationTag ? '1' : '',
         import_time: document.getElementById('filterImportTime').value.trim(),
         highlight_ids: highlightIds.length > 1 ? highlightIds.join(',') : '',
+        sort_field: sortField,
+        sort_order: sortOrder,
         page: currentPage,
         pageSize,
       };
@@ -163,10 +168,23 @@
       return q ? `?${q}` : '';
     }
 
+    function toggleSort(field) {
+      if (sortField === field) sortOrder = sortOrder === 'desc' ? 'asc' : 'desc';
+      else {
+        sortField = field;
+        sortOrder = 'desc';
+      }
+      currentPage = 1;
+      rowSelection.resetSelection(false);
+      loadOrders();
+    }
+
     function renderTableHead() {
       const thead = document.getElementById('sampleOrderHead');
-      thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}${renderOrderTableHeadHtml(tableColumns)}</tr>`;
+      thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}${renderOrderTableHeadHtml(tableColumns, { sortableFields: SORTABLE_FIELDS })}</tr>`;
       rowSelection.setupSelectAllMenu();
+      bindOrderTableSortHeaders(thead, SORTABLE_FIELDS, toggleSort);
+      updateOrderSortIndicators(thead, sortField, sortOrder);
     }
 
     function renderTableBody(rows) {
@@ -340,6 +358,8 @@
         urlAssignee = '';
         urlSampleDateFrom = '';
         urlSampleDateTo = '';
+        sortField = 'created_time';
+        sortOrder = 'desc';
         currentPage = 1;
         rowSelection.resetSelection(false);
         loadOrders();

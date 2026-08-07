@@ -11,7 +11,7 @@
   <script src="/js/common.js"></script>
   <script>
     const PAGE_SIZE = 50;
-    const SORTABLE_FIELDS = ['import_time', 'order_count', 'refund_count'];
+    const SORTABLE_FIELDS = INFLUENCER_VIDEO_SORTABLE_FIELDS || ['publish_date', 'import_time', 'order_count', 'refund_count'];
     let currentPage = 1;
     let totalPages = 1;
     let sortField = 'order_count';
@@ -66,24 +66,10 @@
     }
 
     function renderTableHead() {
-      const displayColumns = buildOrderDisplayColumns(tableColumns);
-      const headers = displayColumns.map((column) => {
-        const sortKey = column.key === ORDER_IMPORT_TIME_HEADER ? 'import_time' : column.key;
-        if (SORTABLE_FIELDS.includes(sortKey)) {
-          const label = column.key === ORDER_IMPORT_TIME_HEADER ? '导入时间' : (column.label || column.key);
-          return `<th class="erp-sortable${column.key === ORDER_IMPORT_TIME_HEADER ? ' cell-import-time' : ''}" data-sort="${sortKey}">${escapeHtml(label)} <span class="erp-sort-indicator" data-field="${sortKey}">↕</span></th>`;
-        }
-        if (column.key === ORDER_IMPORT_TIME_HEADER) {
-          return renderOrderImportTimeHeader();
-        }
-        return `<th>${escapeHtml(column.label || column.key)}</th>`;
-      }).join('');
       const thead = document.getElementById('influencerVideoHead');
-      thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}${headers}</tr>`;
+      thead.innerHTML = `<tr>${TABLE_SELECT_ALL_HEADER}${renderOrderTableHeadHtml(tableColumns, { sortableFields: SORTABLE_FIELDS })}</tr>`;
       rowSelection.setupSelectAllMenu();
-      SORTABLE_FIELDS.forEach((field) => {
-        document.querySelector(`.erp-sort-indicator[data-field="${field}"]`)?.closest('th')?.addEventListener('click', () => toggleSort(field));
-      });
+      bindOrderTableSortHeaders(thead, SORTABLE_FIELDS, toggleSort);
       updateSortIndicators();
     }
 

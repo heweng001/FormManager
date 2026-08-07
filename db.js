@@ -19,8 +19,30 @@ let db = null;
 
 function saveDb() {
   if (!db) return;
+  invalidateListEnrichMapsCache();
   const data = db.export();
   fs.writeFileSync(DB_PATH, Buffer.from(data));
+}
+
+let listEnrichMapsCache = null;
+
+function invalidateListEnrichMapsCache() {
+  listEnrichMapsCache = null;
+}
+
+function getListEnrichMaps() {
+  if (listEnrichMapsCache) return listEnrichMapsCache;
+  listEnrichMapsCache = {
+    tagMap: getInfluencerMergedTagsMap(),
+    metaMap: buildInfluencerMetaMapForStats(),
+    auditSummaryMap: getInfluencerApplicationAuditSummaryMap(),
+    sampleOrderMaps: buildSampleOrderIndexMaps(),
+    collaboratedKeys: getRealCollaboratedInfluencerKeySet(),
+    emailMap: getInfluencerEmailMap(),
+    emailSendMap: getLatestEmailSendSummaryMap(),
+    skuModelMap: getSkuModelLookupMap(),
+  };
+  return listEnrichMapsCache;
 }
 
 function getLastInsertRowId() {
@@ -605,18 +627,21 @@ function enrichRecordsWithMergedFields(rows, options = {}) {
   if (options.light && options.influencerId) {
     return enrichRecordsForInfluencerDetail(list, options.influencerId);
   }
-  const tagMap = getInfluencerMergedTagsMap();
-  const metaMap = buildInfluencerMetaMapForStats();
+  const maps = options.useCache === false
+    ? null
+    : getListEnrichMaps();
+  const tagMap = maps?.tagMap || getInfluencerMergedTagsMap();
+  const metaMap = maps?.metaMap || buildInfluencerMetaMapForStats();
   const auditSummaryMap = options.skipAuditSummary
     ? null
-    : getInfluencerApplicationAuditSummaryMap();
-  const sampleOrderMaps = options.sampleOrderMaps || buildSampleOrderIndexMaps();
+    : maps?.auditSummaryMap || getInfluencerApplicationAuditSummaryMap();
+  const sampleOrderMaps = options.sampleOrderMaps || maps?.sampleOrderMaps || buildSampleOrderIndexMaps();
   const collaboratedKeys = options.skipCollaboratedFlag
     ? new Set()
-    : getRealCollaboratedInfluencerKeySet();
-  const emailMap = getInfluencerEmailMap();
-  const emailSendMap = getLatestEmailSendSummaryMap();
-  const skuModelMap = getSkuModelLookupMap();
+    : maps?.collaboratedKeys || getRealCollaboratedInfluencerKeySet();
+  const emailMap = maps?.emailMap || getInfluencerEmailMap();
+  const emailSendMap = maps?.emailSendMap || getLatestEmailSendSummaryMap();
+  const skuModelMap = maps?.skuModelMap || getSkuModelLookupMap();
   return list.map((row) =>
     enrichRecordWithMergedFields(
       row,
@@ -2969,16 +2994,24 @@ function getSampleOrderPageNumber(id, pageSize = 50) {
 }
 
 function getSampleOrders(filters = {}) {
-  backfillSampleOrderYmdFromRaw();
   const { where, params } = buildSampleOrderWhere(filters);
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
   const pageSize = Math.min(200, Math.max(1, parseInt(filters.pageSize, 10) || 50));
   const offset = (page - 1) * pageSize;
+  const validSortFields = ['created_time', 'import_time', 'id'];
+  const sortField = validSortFields.includes(filters.sort_field) ? filters.sort_field : 'created_time';
+  const sortOrder = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
+  let orderBy = `id DESC`;
+  if (sortField === 'created_time') {
+    orderBy = `COALESCE(NULLIF(TRIM(created_time_ymd), ''), '') ${sortOrder}, id DESC`;
+  } else if (sortField === 'import_time') {
+    orderBy = `COALESCE(NULLIF(TRIM(import_time), ''), '') ${sortOrder}, id DESC`;
+  }
   const total = queryOne(`SELECT COUNT(*) AS total FROM sample_orders ${where}`, params)?.total || 0;
   const rows = queryRows(
     `SELECT id, unique_key, data_json, buyer_username, sku_id, order_id, created_time_raw, created_time_ymd, imported_by, import_time
      FROM sample_orders ${where}
-     ORDER BY id DESC
+     ORDER BY ${orderBy}
      LIMIT ? OFFSET ?`,
     [...params, pageSize, offset]
   ).map((row) => {
@@ -3687,12 +3720,21 @@ function getAllianceOrders(filters = {}) {
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
   const pageSize = Math.min(200, Math.max(1, parseInt(filters.pageSize, 10) || 50));
   const offset = (page - 1) * pageSize;
+  const validSortFields = ['payment_time', 'import_time', 'id'];
+  const sortField = validSortFields.includes(filters.sort_field) ? filters.sort_field : 'payment_time';
+  const sortOrder = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
+  let orderBy = `id DESC`;
+  if (sortField === 'payment_time') {
+    orderBy = `COALESCE(NULLIF(TRIM(payment_time_ymd), ''), '') ${sortOrder}, COALESCE(NULLIF(TRIM(payment_time_raw), ''), '') ${sortOrder}, id DESC`;
+  } else if (sortField === 'import_time') {
+    orderBy = `COALESCE(NULLIF(TRIM(import_time), ''), '') ${sortOrder}, id DESC`;
+  }
   const total = queryOne(`SELECT COUNT(*) AS total FROM alliance_orders ${where}`, params)?.total || 0;
   const rows = queryRows(
     `SELECT id, unique_key, data_json, content_id, creator_username, order_id, payment_time_raw, payment_time_ymd,
             full_return, full_refund, is_refund, imported_by, import_time
      FROM alliance_orders ${where}
-     ORDER BY id DESC
+     ORDER BY ${orderBy}
      LIMIT ? OFFSET ?`,
     [...params, pageSize, offset]
   ).map((row) => {
@@ -4412,13 +4454,16 @@ function buildAllianceOrderStatsByContentIdSubquerySql() {
 }
 
 function resolveInfluencerVideoSort(filters = {}) {
-  const validFields = ['import_time', 'order_count', 'refund_count'];
+  const validFields = ['publish_date', 'import_time', 'order_count', 'refund_count'];
   const field = validFields.includes(filters.sort_field) ? filters.sort_field : 'order_count';
   const order = filters.sort_order === 'asc' ? 'ASC' : 'DESC';
   return { field, order };
 }
 
 function buildInfluencerVideoOrderByClause(sortField, sortOrder) {
+  if (sortField === 'publish_date') {
+    return `COALESCE(NULLIF(TRIM(iv.publish_date_ymd), ''), '') ${sortOrder}, iv.id DESC`;
+  }
   if (sortField === 'import_time') {
     return `iv.import_time ${sortOrder}, iv.id DESC`;
   }
@@ -4429,7 +4474,6 @@ function buildInfluencerVideoOrderByClause(sortField, sortOrder) {
 }
 
 function getInfluencerVideos(filters = {}) {
-  rebuildAllianceOrderDerivedFields();
   const { where, params } = buildInfluencerVideoWhere(filters, 'iv');
   const { field: sortField, order: sortOrder } = resolveInfluencerVideoSort(filters);
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
@@ -4441,7 +4485,8 @@ function getInfluencerVideos(filters = {}) {
     LEFT JOIN (${statsSubquery}) ao_stats
       ON TRIM(COALESCE(iv.content_id, '')) = ao_stats.content_id
   `;
-  const total = queryOne(`SELECT COUNT(*) AS total ${joinFrom} ${where}`, params)?.total || 0;
+  // Count without alliance join — stats only affect display/sort of order/refund columns.
+  const total = queryOne(`SELECT COUNT(*) AS total FROM influencer_videos iv ${where}`, params)?.total || 0;
   const orderBy = buildInfluencerVideoOrderByClause(sortField, sortOrder);
   const rows = queryRows(
     `
