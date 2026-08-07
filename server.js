@@ -565,7 +565,12 @@ function buildCollaboratedFilters(query, user) {
   filters.sample_date_from = toCellValue(query.sample_date_from);
   filters.sample_date_to = toCellValue(query.sample_date_to);
   filters.ordered_after_sample = toCellValue(query.ordered_after_sample) === '1';
+  filters.fulfilled_after_sample = toCellValue(query.fulfilled_after_sample) === '1';
   filters.include_allocation_tag = toTruthyFlag(query.include_allocation_tag);
+  const remindFilter = toCellValue(query.remind_filter);
+  if (remindFilter === 'next_7d') {
+    filters.remind_filter = 'next_7d';
+  }
   if (!isManager(user)) {
     filters.scope_assignee = user.name;
   }
@@ -1424,7 +1429,12 @@ app.post('/api/influencer-profiles/:influencerId/follow-ups', requireAuth, async
     if (!isManager(req.user) && !canStaffAccessInfluencerAssignee(influencerId, req.user.name)) {
       return res.status(403).json({ success: false, message: '无权限操作此达人' });
     }
-    const id = await insertInfluencerFollowUp(influencerId, content, req.user.name);
+    const id = await insertInfluencerFollowUp(
+      influencerId,
+      content,
+      req.user.name,
+      toCellValue(req.body?.remind_at)
+    );
     const rows = await getInfluencerFollowUps(influencerId);
     res.json({ success: true, id, data: rows });
   } catch (err) {

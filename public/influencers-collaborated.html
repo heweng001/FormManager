@@ -49,6 +49,7 @@
     let currentTab = 'recent_sample';
 
     let urlOrderedAfterSample = '';
+    let urlFulfilledAfterSample = '';
     let urlSampleDateFrom = '';
     let urlSampleDateTo = '';
     let urlAssignee = '';
@@ -95,6 +96,8 @@
                 <div class="erp-field"><label>履约进展</label><select id="filterFulfillment" class="erp-input"><option value="">全部</option></select></div>
 
                 <div class="erp-field"><label>寄样日期</label><select id="filterSampleDate" class="erp-input"><option value="">全部</option></select></div>
+
+                <div class="erp-field"><label>跟进提醒</label><select id="filterRemind" class="erp-input"><option value="">全部</option><option value="next_7d">未来7天</option></select></div>
 
                 ${isManager() ? '<div class="erp-field"><label>负责人</label><select id="filterAssignee" class="erp-input"><option value="">全部</option></select></div>' : ''}
 
@@ -364,9 +367,13 @@
         document.getElementById('filterAssignee').value = urlAssignee;
       }
       urlOrderedAfterSample = params.get('ordered_after_sample') === '1' ? '1' : '';
+      urlFulfilledAfterSample = params.get('fulfilled_after_sample') === '1' ? '1' : '';
       urlSampleDateFrom = params.get('sample_date_from') || '';
       urlSampleDateTo = params.get('sample_date_to') || '';
       urlIncludeAllocationTag = params.get('include_allocation_tag') === '1' ? '1' : '';
+      const remindFilter = params.get('remind_filter') || '';
+      const remindSelect = document.getElementById('filterRemind');
+      if (remindSelect && remindFilter === 'next_7d') remindSelect.value = 'next_7d';
       updateCollabTabHint();
     }
 
@@ -382,9 +389,13 @@
 
         sample_date: document.getElementById('filterSampleDate').value.trim(),
 
+        remind_filter: document.getElementById('filterRemind')?.value.trim() || '',
+
         assignee: urlAssignee || (isManager() ? (document.getElementById('filterAssignee')?.value.trim() || '') : ''),
 
         ordered_after_sample: urlOrderedAfterSample,
+
+        fulfilled_after_sample: urlFulfilledAfterSample,
 
         sample_date_from: urlSampleDateFrom,
 
@@ -759,11 +770,15 @@
       const count = Number(row.follow_up_count) || 0;
       const latest = String(row.latest_follow_up || '').trim();
       const latestAt = String(row.latest_follow_up_at || '').trim();
+      const remindAt = String(row.active_remind_at || '').trim();
       const dateLabel = latestAt ? formatDateTime(latestAt).split(' ')[0] : '';
       const openBtn = (className, label, title = '') =>
         `<button type="button" class="erp-follow-up-open ${className}" data-influencer-id="${escapeAttr(key)}"${title ? ` title="${escapeAttr(title)}"` : ''}>${label}</button>`;
+      const remindIcon = remindAt
+        ? `<span class="erp-remind-icon" title="${escapeAttr(`跟进提醒：${remindAt}`)}" aria-label="${escapeAttr(`跟进提醒：${remindAt}`)}">⏰</span>`
+        : '';
       if (!count) {
-        return `<div class="erp-follow-up-cell">${openBtn('erp-follow-up-empty', '暂无', '查看跟进记录')}</div>`;
+        return `<div class="erp-follow-up-cell">${openBtn('erp-follow-up-empty', '暂无', '查看跟进记录')}${remindIcon}</div>`;
       }
       const preview = latest.length > 36 ? `${latest.slice(0, 36)}…` : latest;
       const datePart = dateLabel
@@ -771,7 +786,7 @@
         : '';
       return `
         <div class="erp-follow-up-cell">
-          ${datePart}${openBtn('erp-follow-up-preview', escapeHtml(preview || '-'), latest)}<span class="erp-follow-up-sep" aria-hidden="true">·</span>${openBtn('erp-follow-up-count', `${count} 条`, '查看全部跟进记录')}
+          ${datePart}${openBtn('erp-follow-up-preview', escapeHtml(preview || '-'), latest)}<span class="erp-follow-up-sep" aria-hidden="true">·</span>${openBtn('erp-follow-up-count', `${count} 条`, '查看全部跟进记录')}${remindIcon}
         </div>
       `;
     }
@@ -1853,12 +1868,16 @@
 
         document.getElementById('filterSampleDate').value = '';
 
+        if (document.getElementById('filterRemind')) document.getElementById('filterRemind').value = '';
+
         if (document.getElementById('filterAssignee')) document.getElementById('filterAssignee').value = '';
 
         urlAssignee = '';
         urlOrderedAfterSample = '';
+        urlFulfilledAfterSample = '';
         urlSampleDateFrom = '';
         urlSampleDateTo = '';
+        urlIncludeAllocationTag = '';
 
         currentTab = 'recent_sample';
 
@@ -1909,6 +1928,7 @@
       document.getElementById('filterFulfillment').addEventListener('change', () => { currentPage = 1; resetSelection(false); loadStats(); });
 
       document.getElementById('filterSampleDate').addEventListener('change', () => { currentPage = 1; resetSelection(false); loadStats(); });
+      document.getElementById('filterRemind')?.addEventListener('change', () => { currentPage = 1; resetSelection(false); loadStats(); });
 
       document.getElementById('filterAssignee')?.addEventListener('change', () => {
         urlAssignee = document.getElementById('filterAssignee')?.value.trim() || '';

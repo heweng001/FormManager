@@ -244,6 +244,16 @@ function migrateInfluencerProfilesWhatsapp() {
   }
 }
 
+function migrateInfluencerFollowUpsRemindAt() {
+  const info = db.exec('PRAGMA table_info(influencer_follow_ups)');
+  if (!info.length) return;
+  const columns = info[0].values.map((row) => row[1]);
+  if (!columns.includes('remind_at')) {
+    db.run('ALTER TABLE influencer_follow_ups ADD COLUMN remind_at TEXT');
+    saveDb();
+  }
+}
+
 function migrateStaffMailSettings() {
   const info = db.exec('PRAGMA table_info(staff)');
   if (!info.length) return;
@@ -989,6 +999,7 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_influencer_follow_ups_influencer
     ON influencer_follow_ups(influencer_id)
   `);
+  migrateInfluencerFollowUpsRemindAt();
 
   migrateInfluencerProfilesRemark();
   migrateInfluencerProfilesPinned();
@@ -1923,8 +1934,69 @@ function getRecordsByInfluencerId(influencerId, filters = {}) {
   return Promise.resolve(enriched);
 }
 
+function normalizeFollowUpRemindAt(value) {
+  const text = String(value || '').trim().replace('T', ' ');
+  if (!text) return '';
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})[ ](\d{2}):(\d{2})/);
+  if (!match) return '';
+  return `${match[1]} ${match[2]}:${match[3]}`;
+}
+
+function remindAtToYmd(remindAt) {
+  const normalized = normalizeFollowUpRemindAt(remindAt);
+  if (!normalized) return '';
+  return normalized.slice(0, 10).replace(/-/g, '');
+}
+
+/** 提醒保留到当天结束：提醒日 >= 今天（北京）仍有效。 */
+function isFollowUpRemindActive(remindAt, todayYmd = '') {
+  const remindYmd = remindAtToYmd(remindAt);
+  if (!remindYmd || !isValidYmd(remindYmd)) return false;
+  const today = todayYmd || (() => {
+    const parts = getBeijingDateParts();
+    return `${parts.yearStr}${parts.monthStr}${parts.dayStr}`;
+  })();
+  return remindYmd >= today;
+}
+
+function addDaysToYmd(ymd, days) {
+  if (!isValidYmd(ymd)) return '';
+  const date = new Date(Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(4, 6)) - 1, Number(ymd.slice(6, 8))));
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}${m}${d}`;
+}
+
+function isActiveRemindWithinNextDays(remindAt, days = 7) {
+  if (!isFollowUpRemindActive(remindAt)) return false;
+  const remindYmd = remindAtToYmd(remindAt);
+  const parts = getBeijingDateParts();
+  const today = `${parts.yearStr}${parts.monthStr}${parts.dayStr}`;
+  const end = addDaysToYmd(today, days);
+  return remindYmd <= end;
+}
+
+function clearInfluencerFollowUpReminders(influencerId, { exceptId = null } = {}) {
+  const canonical = resolveCanonicalInfluencerId(influencerId) || String(influencerId || '').trim();
+  if (!canonical) return;
+  const conditions = [];
+  const params = [];
+  appendInfluencerIdSqlFilter(conditions, params, 'influencer_id', canonical);
+  if (exceptId) {
+    conditions.push('id != ?');
+    params.push(Number(exceptId));
+  }
+  conditions.push(`TRIM(COALESCE(remind_at, '')) != ''`);
+  db.run(`UPDATE influencer_follow_ups SET remind_at = '' WHERE ${conditions.join(' AND ')}`, params);
+}
+
 function getInfluencerFollowUpSummaryMap() {
   const map = new Map();
+  const todayParts = getBeijingDateParts();
+  const todayYmd = `${todayParts.yearStr}${todayParts.monthStr}${todayParts.dayStr}`;
+
   queryRows(
     `
     SELECT influencer_id, COUNT(*) AS cnt
@@ -1937,6 +2009,7 @@ function getInfluencerFollowUpSummaryMap() {
       follow_up_count: Number(row.cnt) || 0,
       latest_follow_up: '',
       latest_follow_up_at: '',
+      active_remind_at: '',
     });
   });
   queryRows(
@@ -1955,11 +2028,29 @@ function getInfluencerFollowUpSummaryMap() {
       follow_up_count: 0,
       latest_follow_up: '',
       latest_follow_up_at: '',
+      active_remind_at: '',
     };
     entry.latest_follow_up = String(row.content || '').trim();
     entry.latest_follow_up_at = String(row.created_at || '').trim();
     if (!entry.follow_up_count) entry.follow_up_count = 1;
     map.set(key, entry);
+  });
+
+  // 每人取最新一条仍有效的提醒（按 id 倒序）；过期仅在读取时视为无效，不写库。
+  queryRows(
+    `
+    SELECT id, influencer_id, remind_at
+    FROM influencer_follow_ups
+    WHERE TRIM(COALESCE(remind_at, '')) != ''
+    ORDER BY id DESC
+    `
+  ).forEach((row) => {
+    const key = normalizeMatchKey(row.influencer_id);
+    if (!key || !map.has(key)) return;
+    const entry = map.get(key);
+    if (entry.active_remind_at) return;
+    if (!isFollowUpRemindActive(row.remind_at, todayYmd)) return;
+    entry.active_remind_at = normalizeFollowUpRemindAt(row.remind_at);
   });
   return map;
 }
@@ -1978,30 +2069,44 @@ function getInfluencerFollowUps(influencerId) {
   const conditions = [];
   const params = [];
   appendInfluencerIdSqlFilter(conditions, params, 'influencer_id', id);
-  return Promise.resolve(
-    queryRows(
-      `
-      SELECT id, influencer_id, content, created_by, created_at
+  const todayParts = getBeijingDateParts();
+  const todayYmd = `${todayParts.yearStr}${todayParts.monthStr}${todayParts.dayStr}`;
+  const rows = queryRows(
+    `
+      SELECT id, influencer_id, content, created_by, created_at, remind_at
       FROM influencer_follow_ups
       WHERE ${conditions.join(' AND ')}
       ORDER BY datetime(created_at) DESC, id DESC
       `,
-      params
-    )
-  );
+    params
+  ).map((row) => {
+    const remindAt = normalizeFollowUpRemindAt(row.remind_at);
+    const active = isFollowUpRemindActive(remindAt, todayYmd);
+    return {
+      ...row,
+      remind_at: active ? remindAt : '',
+      remind_at_raw: remindAt,
+      remind_active: active,
+    };
+  });
+  return Promise.resolve(rows);
 }
 
-function insertInfluencerFollowUp(influencerId, content, createdBy = '') {
-  const id = String(influencerId || '').trim();
+function insertInfluencerFollowUp(influencerId, content, createdBy = '', remindAt = '') {
+  const id = resolveCanonicalInfluencerId(influencerId) || String(influencerId || '').trim();
   const text = String(content || '').trim();
+  const remind = normalizeFollowUpRemindAt(remindAt);
   if (!id) return Promise.reject(new Error('达人 id 不能为空'));
   if (!text) return Promise.reject(new Error('跟进内容不能为空'));
+  if (remind) {
+    clearInfluencerFollowUpReminders(id);
+  }
   db.run(
-    `INSERT INTO influencer_follow_ups (influencer_id, content, created_by) VALUES (?, ?, ?)`,
-    [id, text, createdBy || '']
+    `INSERT INTO influencer_follow_ups (influencer_id, content, created_by, remind_at) VALUES (?, ?, ?, ?)`,
+    [id, text, createdBy || '', remind]
   );
   saveDb();
-  return Promise.resolve(db.exec('SELECT last_insert_rowid()')[0].values[0][0]);
+  return Promise.resolve(getLastInsertRowId());
 }
 
 function deleteInfluencerFollowUp(followUpId) {
@@ -4096,11 +4201,11 @@ function calcVideoRecoveryRatePercent(publishedInfluencerCount, sampleCount) {
   return (publishedInfluencers / samples) * 100;
 }
 
-function calcVideoOutputRatePercent(publishedVideoCount, sampleCount) {
+function calcVideoOutputRate(publishedVideoCount, sampleCount) {
   const videos = Number(publishedVideoCount) || 0;
   const samples = Number(sampleCount) || 0;
   if (samples <= 0) return null;
-  return (videos / samples) * 100;
+  return Math.round((videos / samples) * 100) / 100;
 }
 
 function finalizeSampleShipmentStatsRow(row) {
@@ -4110,7 +4215,7 @@ function finalizeSampleShipmentStatsRow(row) {
     row.audit_tentative
   );
   row.video_recovery_rate = calcVideoRecoveryRatePercent(row.published_influencer_count, row.sample_count);
-  row.video_output_rate = calcVideoOutputRatePercent(row.published_video_count, row.sample_count);
+  row.video_output_rate = calcVideoOutputRate(row.published_video_count, row.sample_count);
   row.order_rate = calcOrderRatePercent(row.ordered_influencer_count, row.sample_count);
   row.avg_order_count = calcAvgOrderCount(row.order_count, row.sample_count);
   return row;
@@ -4190,6 +4295,59 @@ function getOrderedAfterSampleInfluencerKeys(filters = {}) {
     }
   });
   return orderedKeys;
+}
+
+/** 寄样统计「履约达人」口径：区间内寄样且存在发布日期晚于寄样日期的视频。 */
+function getFulfilledAfterSampleInfluencerKeys(filters = {}) {
+  const sampleFrom = String(filters.sample_date_from || '').trim();
+  const sampleTo = String(filters.sample_date_to || '').trim();
+  if (!sampleFrom || !sampleTo) return new Set();
+
+  const metaMap = buildInfluencerMetaMapForStats();
+  const sampledInfluencers = new Map();
+  const statsFilters = {
+    include_allocation_tag: filters.include_allocation_tag,
+    scope_assignee: filters.scope_assignee,
+  };
+
+  queryRows(
+    `SELECT buyer_username, created_time_ymd, created_time_raw
+     FROM sample_orders
+     WHERE TRIM(COALESCE(buyer_username, '')) != ''`
+  ).forEach((order) => {
+    const ymd = resolveSampleOrderYmd(order);
+    if (!ymdInRangeForStats(ymd, sampleFrom, sampleTo)) return;
+    const meta = getInfluencerMetaForStats(metaMap, order.buyer_username, order.buyer_username);
+    if (isAllocationTaggedInfluencerForStats(meta.tags, statsFilters)) return;
+    if (filters.assignee_filter === SAMPLE_STATS_EMPTY_ASSIGNEE_KEY) {
+      if (meta.assignees.length) return;
+    } else if (filters.assignee_filter && !meta.assignees.includes(filters.assignee_filter)) return;
+    if (filters.scope_assignee && !meta.assignees.includes(filters.scope_assignee)) return;
+    if (
+      (filters.assignee_filter || filters.scope_assignee) &&
+      !meta.assignees.length &&
+      filters.assignee_filter !== SAMPLE_STATS_EMPTY_ASSIGNEE_KEY
+    ) {
+      return;
+    }
+    const influencerKey = resolveCanonicalInfluencerKey(order.buyer_username);
+    if (!influencerKey) return;
+    if (!sampledInfluencers.has(influencerKey)) sampledInfluencers.set(influencerKey, new Set());
+    sampledInfluencers.get(influencerKey).add(ymd);
+  });
+
+  const videoIndex = buildInfluencerVideosIndexByCreatorKey();
+  const fulfilledKeys = new Set();
+  sampledInfluencers.forEach((sampleDates, influencerKey) => {
+    const videos = videoIndex.get(influencerKey) || [];
+    const ok = videos.some((video) => {
+      const publishYmd = String(video.publish_date_ymd || '').trim();
+      if (!isValidYmd(publishYmd)) return false;
+      return [...sampleDates].some((sampleYmd) => publishYmd > sampleYmd);
+    });
+    if (ok) fulfilledKeys.add(influencerKey);
+  });
+  return fulfilledKeys;
 }
 
 /** Alliance order IDs matching寄样统计「出单」口径（含达人别名、「分配」标签过滤）。 */
@@ -5537,6 +5695,7 @@ function buildCollaboratedRows(filters = {}) {
       follow_up_count: followSummary?.follow_up_count || 0,
       latest_follow_up: followSummary?.latest_follow_up || '',
       latest_follow_up_at: followSummary?.latest_follow_up_at || '',
+      active_remind_at: followSummary?.active_remind_at || '',
       influencer_application_count: auditSummary?.application_count || 0,
       influencer_mixed_audit: !!auditSummary?.has_mixed_audit_status,
     };
@@ -5575,6 +5734,15 @@ function buildCollaboratedRows(filters = {}) {
     rows = rows.filter((row) =>
       getInfluencerAliasKeys(row.influencer_id).some((key) => orderedKeys.has(key))
     );
+  }
+  if (filters.fulfilled_after_sample) {
+    const fulfilledKeys = getFulfilledAfterSampleInfluencerKeys(filters);
+    rows = rows.filter((row) =>
+      getInfluencerAliasKeys(row.influencer_id).some((key) => fulfilledKeys.has(key))
+    );
+  }
+  if (filters.remind_filter === 'next_7d') {
+    rows = rows.filter((row) => isActiveRemindWithinNextDays(row.active_remind_at, 7));
   }
 
   const tab = filters.collab_tab || 'all';

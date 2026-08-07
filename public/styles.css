@@ -630,6 +630,46 @@ input.erp-input.erp-date-input {
   display: none;
 }
 
+.erp-stats-combo {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.erp-stats-combo-side {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.erp-follow-up-remind-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+.erp-datetime-input {
+  width: auto;
+  min-width: 190px;
+}
+
+.erp-follow-up-remind {
+  margin-left: 8px;
+  color: #b45309;
+  font-size: 12px;
+}
+
+.erp-remind-icon {
+  margin-left: 4px;
+  cursor: help;
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
 .erp-audit-app-badge {
   flex-shrink: 0;
   min-width: 18px;

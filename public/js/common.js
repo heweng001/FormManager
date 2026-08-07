@@ -3039,21 +3039,33 @@ function renderInfluencerAuditDetailHtml(records, renameLogs = []) {
   return `${sharedHtml}${tableHtml}`;
 }
 
+function defaultFollowUpRemindLocalValue() {
+  const d = new Date();
+  d.setDate(d.getDate() + 7);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function renderFollowUpPanel(influencerId, items, options = {}) {
   const canDelete = !!options.canDelete;
-  const listHtml = items.length
-    ? items
-        .map(
-          (item) => `
+  const list = Array.isArray(items) ? items : [];
+  const listHtml = list.length
+    ? list
+        .map((item) => {
+          const remindAt = String(item.remind_at || '').trim();
+          const remindHtml = remindAt
+            ? `<span class="erp-follow-up-remind" title="${escapeAttr(`提醒：${remindAt}`)}">⏰ ${escapeHtml(remindAt)}</span>`
+            : '';
+          return `
         <div class="erp-follow-up-item">
           <div class="erp-follow-up-item-head">
-            <div class="erp-follow-up-meta">${escapeHtml(formatDateTime(item.created_at))} · ${escapeHtml(item.created_by || '未知')}</div>
+            <div class="erp-follow-up-meta">${escapeHtml(formatDateTime(item.created_at))} · ${escapeHtml(item.created_by || '未知')}${remindHtml}</div>
             ${canDelete ? `<button type="button" class="erp-btn erp-btn-danger erp-btn-sm follow-up-delete-btn" data-id="${item.id}" data-influencer-id="${escapeAttr(influencerId)}">删除</button>` : ''}
           </div>
           <div class="erp-follow-up-content">${escapeHtml(item.content || '')}</div>
         </div>
-      `
-        )
+      `;
+        })
         .join('')
     : '<div class="erp-meta">暂无跟进记录</div>';
   return `
@@ -3061,6 +3073,14 @@ function renderFollowUpPanel(influencerId, items, options = {}) {
     <div class="erp-follow-up-form">
       <label class="erp-detail-label">添加跟进记录</label>
       <textarea id="followUpInput" class="erp-input" rows="3" placeholder="输入跟进内容"></textarea>
+      <div class="erp-follow-up-remind-row">
+        <label class="erp-checkbox-label">
+          <input type="checkbox" id="followUpRemindEnable" />
+          设置跟进提醒
+        </label>
+        <input id="followUpRemindAt" class="erp-input erp-datetime-input" type="datetime-local" value="${escapeAttr(defaultFollowUpRemindLocalValue())}" />
+      </div>
+      <p class="erp-meta">默认提醒时间为 7 天后同一时刻；勾选后才会保存提醒。每人仅保留最新一条有效提醒。</p>
       <div class="erp-follow-up-actions">
         <button type="button" id="followUpSubmitBtn" class="erp-btn erp-btn-primary" data-influencer-id="${escapeAttr(influencerId)}">添加</button>
       </div>
@@ -3186,11 +3206,15 @@ function bindInfluencerDetailModal() {
     const input = document.getElementById('followUpInput');
     const content = input?.value.trim() || '';
     if (!content) return alert('请输入跟进内容');
+    const remindEnabled = !!document.getElementById('followUpRemindEnable')?.checked;
+    const remindLocal = String(document.getElementById('followUpRemindAt')?.value || '').trim();
+    const remind_at = remindEnabled ? remindLocal.replace('T', ' ') : '';
+    if (remindEnabled && !remind_at) return alert('请选择提醒时间');
     btn.disabled = true;
     try {
       const { res, data } = await api(`/api/influencer-profiles/${encodeURIComponent(influencerId)}/follow-ups`, {
         method: 'POST',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, remind_at }),
       });
       if (!res.ok) throw new Error(data.message || '添加失败');
       await loadAndRenderFollowUps(influencerId);
