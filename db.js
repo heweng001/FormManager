@@ -965,6 +965,7 @@ async function initDatabase() {
   clearZeroCommissionRates();
   seedAdminUser();
   rebuildAllianceOrderDerivedFields();
+  migrateRepairFutureSwappedAlliancePaymentDates();
   saveDb();
 }
 
@@ -2244,6 +2245,67 @@ function migrateReconcileAlliancePaymentYmd() {
   setAppMeta('alliance_payment_ymd_reconcile_v1', '1');
 }
 
+/** Fix payment dates that were stored as DD/MM (future) but originated as US MM/DD. */
+function migrateRepairFutureSwappedAlliancePaymentDates() {
+  ensureAppMetaTable();
+  if (getAppMeta('alliance_payment_mdy_prefer_repair_v1') === '1') return;
+
+  const futureLimit = shiftBeijingYmd(7);
+  let changed = 0;
+  queryRows(
+    `
+    SELECT id, payment_time_raw, payment_time_ymd, data_json
+    FROM alliance_orders
+    WHERE TRIM(COALESCE(payment_time_ymd, '')) > ?
+    `,
+    [futureLimit]
+  ).forEach((row) => {
+    const ymd = String(row.payment_time_ymd || '').trim();
+    if (!/^\d{8}$/.test(ymd)) return;
+    const month = Number(ymd.slice(4, 6));
+    const day = Number(ymd.slice(6, 8));
+    // Swapped MM/DD→DD/MM always yields day<=12; day>12 means original MDY was unambiguous.
+    if (day > 12) return;
+    const swapped = buildYmdFromMonthDayYear(day, month, ymd.slice(0, 4));
+    if (!swapped || swapped === ymd || swapped > futureLimit) return;
+
+    const time = extractTimePartsFromText(row.payment_time_raw || '');
+    const newRaw = formatDisplayDateTimeParts({
+      year: swapped.slice(0, 4),
+      month: swapped.slice(4, 6),
+      day: swapped.slice(6, 8),
+      hour: time?.hour || 0,
+      minute: time?.minute || 0,
+      second: time?.second || 0,
+      hasTime: Boolean(time),
+      hasSeconds: Boolean(time?.hasSeconds),
+    });
+
+    let data = {};
+    try {
+      data = JSON.parse(row.data_json || '{}');
+    } catch {
+      data = {};
+    }
+    if (data && typeof data === 'object') {
+      data.payment_time_raw = newRaw;
+    }
+
+    db.run(
+      `
+      UPDATE alliance_orders
+      SET payment_time_raw = ?, payment_time_ymd = ?, data_json = ?
+      WHERE id = ?
+      `,
+      [newRaw, swapped, JSON.stringify(data), row.id]
+    );
+    changed += 1;
+  });
+
+  setAppMeta('alliance_payment_mdy_prefer_repair_v1', '1');
+  if (changed) saveDb();
+}
+
 function migrateClearAllianceOrdersColumnTrimV1() {
   ensureAppMetaTable();
   if (getAppMeta('alliance_orders_column_trim_v1') === '1') return;
@@ -2700,36 +2762,58 @@ function formatYmdFromDate(date) {
 
 function isValidYmd(ymd) {
   if (!/^\d{8}$/.test(String(ymd || ''))) return false;
+  const year = Number(ymd.slice(0, 4));
   const month = Number(ymd.slice(4, 6));
   const day = Number(ymd.slice(6, 8));
-  return month >= 1 && month <= 12 && day >= 1 && day <= 31;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return (
+    dt.getUTCFullYear() === year &&
+    dt.getUTCMonth() + 1 === month &&
+    dt.getUTCDate() === day
+  );
 }
 
-function parseSlashDateToYmd(parts) {
-  const a = Number(parts[0]);
-  const b = Number(parts[1]);
-  const y = String(parts[2]);
-  let month;
-  let day;
-  if (a > 12) {
-    day = a;
-    month = b;
-  } else if (b > 12) {
-    month = a;
-    day = b;
-  } else if (a > b) {
-    month = a;
-    day = b;
-  } else if (a < b) {
-    day = a;
-    month = b;
-  } else {
-    month = a;
-    day = b;
+function normalizeParsedYear(yearPart) {
+  const text = String(yearPart || '').trim();
+  if (/^\d{4}$/.test(text)) return text;
+  if (/^\d{2}$/.test(text)) {
+    const n = Number(text);
+    return n >= 70 ? `19${text}` : `20${text}`;
   }
+  return text;
+}
+
+function buildYmdFromMonthDayYear(month, day, year) {
+  const y = normalizeParsedYear(year);
+  if (!/^\d{4}$/.test(y)) return '';
   if (month < 1 || month > 12 || day < 1 || day > 31) return '';
   const ymd = `${y}${String(month).padStart(2, '0')}${String(day).padStart(2, '0')}`;
   return isValidYmd(ymd) ? ymd : '';
+}
+
+/**
+ * Parse M/D/Y or D/M/Y style parts.
+ * TikTok US / Excel US exports use MM/DD/YYYY — always prefer that when ambiguous.
+ */
+function parseSlashDateToYmd(parts) {
+  const a = Number(parts[0]);
+  const b = Number(parts[1]);
+  const year = parts[2];
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return '';
+
+  if (a > 12 && b <= 12) {
+    // Unambiguous day/month
+    return buildYmdFromMonthDayYear(b, a, year);
+  }
+  if (b > 12 && a <= 12) {
+    // Unambiguous month/day
+    return buildYmdFromMonthDayYear(a, b, year);
+  }
+  if (a > 12 || b > 12) return '';
+
+  // Ambiguous (both <= 12): prefer US MM/DD.
+  return buildYmdFromMonthDayYear(a, b, year);
 }
 
 function parseCreatedTimeToYmd(value) {
@@ -2744,13 +2828,16 @@ function parseCreatedTimeToYmd(value) {
     const ymd = `${y}${m}${d}`;
     return isValidYmd(ymd) ? ymd : '';
   }
+  // Prefer explicit MM/DD parser over locale-dependent Date() for slash dates
+  // (including values that also contain AM/PM).
+  if (/^\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/.test(text)) {
+    const parts = text.split(/[ T]/)[0].split(/[-/.]/);
+    const ymd = parseSlashDateToYmd(parts);
+    if (ymd) return ymd;
+  }
   if (/\b(AM|PM)\b/i.test(text)) {
     const date = new Date(text);
     if (!Number.isNaN(date.getTime())) return formatYmdFromDate(date);
-  }
-  if (/^\d{1,2}[./-]\d{1,2}[./-]\d{4}/.test(text)) {
-    const parts = text.split(/[ T]/)[0].split(/[-/.]/);
-    return parseSlashDateToYmd(parts);
   }
   const serial = Number(text);
   if (!Number.isNaN(serial) && serial > 30000 && serial < 100000) {
