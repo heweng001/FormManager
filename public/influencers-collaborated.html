@@ -641,6 +641,12 @@
 
       const linkHtml = renderInfluencerLink(id);
 
+      const auditCount = Number(row.influencer_application_count) || 0;
+
+      const idToneClass = auditCount > 0 ? 'erp-influencer-id--has-audit' : 'erp-influencer-id--no-audit';
+
+      const tonedLink = `<span class="${idToneClass}">${linkHtml}</span>`;
+
       const trendBtn = `<button type="button" class="erp-trend-btn" data-influencer-id="${escapeAttr(key)}" title="月度出单对比" aria-label="月度出单对比"><span class="erp-trend-icon" aria-hidden="true"></span></button>`;
 
       const badge = renderInfluencerApplicationCountBadge(
@@ -651,10 +657,10 @@
           influencer_application_count: row.influencer_application_count,
           influencer_mixed_audit: row.influencer_mixed_audit,
         },
-        { minCount: 1 }
+        { minCount: 2 }
       );
 
-      return `<span class="erp-influencer-id-wrap"><span class="erp-influencer-id-cell">${linkHtml}${trendBtn}${renderPinButton(id, row.pinned)}</span>${badge}${renderInfluencerEmailInline(key, row.email, row)}</span>`;
+      return `<span class="erp-influencer-id-wrap"><span class="erp-influencer-id-cell">${tonedLink}${trendBtn}${renderPinButton(id, row.pinned)}</span>${badge}${renderInfluencerContactIcons(key, row)}</span>`;
 
     }
 
@@ -1395,6 +1401,13 @@
       window.onInfluencerEmailSaved = (influencerId, email) => {
         const cached = recordsCache.get(String(influencerId));
         if (cached) cached.email = email;
+      };
+
+      window.onInfluencerContactSaved = (influencerId, type, value) => {
+        const cached = recordsCache.get(String(influencerId));
+        if (!cached) return;
+        if (type === 'email') cached.email = value;
+        if (type === 'phone') cached.phone = value;
       };
 
       window.onInfluencerIdRenamed = () => {

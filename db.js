@@ -39,6 +39,7 @@ function getListEnrichMaps() {
     sampleOrderMaps: buildSampleOrderIndexMaps(),
     collaboratedKeys: getRealCollaboratedInfluencerKeySet(),
     emailMap: getInfluencerEmailMap(),
+    phoneMap: getInfluencerPhoneMap(),
     emailSendMap: getLatestEmailSendSummaryMap(),
     skuModelMap: getSkuModelLookupMap(),
   };
@@ -218,6 +219,16 @@ function migrateInfluencerProfilesEmail() {
   const columns = info[0].values.map((row) => row[1]);
   if (!columns.includes('email')) {
     db.run('ALTER TABLE influencer_profiles ADD COLUMN email TEXT');
+    saveDb();
+  }
+}
+
+function migrateInfluencerProfilesPhone() {
+  const info = db.exec('PRAGMA table_info(influencer_profiles)');
+  if (!info.length) return;
+  const columns = info[0].values.map((row) => row[1]);
+  if (!columns.includes('phone')) {
+    db.run('ALTER TABLE influencer_profiles ADD COLUMN phone TEXT');
     saveDb();
   }
 }
@@ -640,6 +651,7 @@ function enrichRecordsWithMergedFields(rows, options = {}) {
     ? new Set()
     : maps?.collaboratedKeys || getRealCollaboratedInfluencerKeySet();
   const emailMap = maps?.emailMap || getInfluencerEmailMap();
+  const phoneMap = maps?.phoneMap || getInfluencerPhoneMap();
   const emailSendMap = maps?.emailSendMap || getLatestEmailSendSummaryMap();
   const skuModelMap = maps?.skuModelMap || getSkuModelLookupMap();
   return list.map((row) =>
@@ -652,7 +664,8 @@ function enrichRecordsWithMergedFields(rows, options = {}) {
       collaboratedKeys,
       emailMap,
       emailSendMap,
-      skuModelMap
+      skuModelMap,
+      phoneMap
     )
   );
 }
@@ -670,7 +683,8 @@ function enrichRecordWithMergedFields(
   collaboratedKeys,
   emailMap,
   emailSendMap,
-  skuModelMap
+  skuModelMap,
+  phoneMap
 ) {
   if (!row) return row;
   const tagsMap = tagMap || getInfluencerMergedTagsMap();
@@ -700,6 +714,7 @@ function enrichRecordWithMergedFields(
   const collabKeys = collaboratedKeys || getRealCollaboratedInfluencerKeySet();
   row.is_collaborated = !!canonicalKey && collabKeys.has(canonicalKey);
   row.email = (emailMap || getInfluencerEmailMap()).get(canonicalKey) || '';
+  row.phone = (phoneMap || getInfluencerPhoneMap()).get(canonicalKey) || '';
   applyEmailSendSummaryToRow(
     row,
     (emailSendMap || getLatestEmailSendSummaryMap()).get(canonicalKey)
@@ -965,6 +980,7 @@ async function initDatabase() {
   migrateInfluencerProfilesFulfillment();
   migrateInfluencerProfileInfluencerRemark();
   migrateInfluencerProfilesEmail();
+  migrateInfluencerProfilesPhone();
   migrateFulfillmentProgressShortLabels();
   migrateRemoveDuplicateSampleTag();
   migrateRecordsAssignee();
@@ -1993,16 +2009,36 @@ function getInfluencerEmailMap() {
   );
   const map = new Map();
   rows.forEach((row) => {
-    map.set(normalizeMatchKey(row.influencer_id), String(row.email || '').trim());
+    const value = String(row.email || '').trim();
+    getInfluencerAliasKeys(row.influencer_id).forEach((key) => map.set(key, value));
+  });
+  return map;
+}
+
+function getInfluencerPhoneMap() {
+  const rows = queryRows(
+    `SELECT influencer_id, phone FROM influencer_profiles WHERE TRIM(COALESCE(phone, '')) != ''`
+  );
+  const map = new Map();
+  rows.forEach((row) => {
+    const value = String(row.phone || '').trim();
+    getInfluencerAliasKeys(row.influencer_id).forEach((key) => map.set(key, value));
   });
   return map;
 }
 
 function updateInfluencerProfileEmail(influencerId, email, updatedBy = '') {
-  const id = String(influencerId || '').trim();
+  const id = resolveCanonicalInfluencerId(influencerId) || String(influencerId || '').trim();
   const value = String(email ?? '').trim();
   if (!id) return Promise.reject(new Error('达人 id 不能为空'));
   return upsertInfluencerProfile(id, { email: value }, updatedBy).then(() => value);
+}
+
+function updateInfluencerProfilePhone(influencerId, phone, updatedBy = '') {
+  const id = resolveCanonicalInfluencerId(influencerId) || String(influencerId || '').trim();
+  const value = String(phone ?? '').trim();
+  if (!id) return Promise.reject(new Error('达人 id 不能为空'));
+  return upsertInfluencerProfile(id, { phone: value }, updatedBy).then(() => value);
 }
 
 const {
@@ -4970,7 +5006,7 @@ function recordMatchesTagFilter(tagsValue, tagFilter) {
 
 function getInfluencerProfileMap() {
   const rows = queryRows(
-    'SELECT influencer_id, tags, assignee, influencer_remark, pinned, pinned_at, fulfillment_progress, email FROM influencer_profiles'
+    'SELECT influencer_id, tags, assignee, influencer_remark, pinned, pinned_at, fulfillment_progress, email, phone FROM influencer_profiles'
   );
   const map = new Map();
   rows.forEach((row) => {
@@ -5015,6 +5051,10 @@ function upsertInfluencerProfile(influencerId, fields, updatedBy = '') {
       updates.push('email = ?');
       params.push(fields.email || '');
     }
+    if (fields.phone !== undefined) {
+      updates.push('phone = ?');
+      params.push(fields.phone || '');
+    }
     if (!updates.length) return Promise.resolve(id);
     updates.push('updated_by = ?');
     updates.push('update_time = CURRENT_TIMESTAMP');
@@ -5030,8 +5070,8 @@ function upsertInfluencerProfile(influencerId, fields, updatedBy = '') {
       if (rec?.assignee) assignee = rec.assignee;
     }
     db.run(
-      `INSERT INTO influencer_profiles (influencer_id, tags, assignee, remark, influencer_remark, fulfillment_progress, email, updated_by)
-       VALUES (?, ?, ?, '', ?, ?, ?, ?)`,
+      `INSERT INTO influencer_profiles (influencer_id, tags, assignee, remark, influencer_remark, fulfillment_progress, email, phone, updated_by)
+       VALUES (?, ?, ?, '', ?, ?, ?, ?, ?)`,
       [
         id,
         tags,
@@ -5039,6 +5079,7 @@ function upsertInfluencerProfile(influencerId, fields, updatedBy = '') {
         influencerRemark,
         fields.fulfillment_progress !== undefined ? fields.fulfillment_progress || '' : '',
         fields.email !== undefined ? fields.email || '' : '',
+        fields.phone !== undefined ? fields.phone || '' : '',
         updatedBy || '',
       ]
     );
@@ -5430,6 +5471,7 @@ function buildCollaboratedRows(filters = {}) {
       assignee_conflict: assigneeInfo.assignee_conflict,
       influencer_remark: profile?.influencer_remark || '',
       email: profile?.email || '',
+      phone: profile?.phone || '',
       latest_email_send_at: sendSummary?.sent_at || '',
       latest_email_send_status: sendSummary?.status || '',
       latest_email_send_error: sendSummary?.error_message || '',
@@ -5627,7 +5669,7 @@ function getCollaboratedRowForInfluencer(influencerId) {
   const displayValues = getInfluencerAliasDisplayValues(id);
   const profile = queryOne(
     `
-    SELECT influencer_id, tags, assignee, influencer_remark, fulfillment_progress, email, pinned, pinned_at
+    SELECT influencer_id, tags, assignee, influencer_remark, fulfillment_progress, email, phone, pinned, pinned_at
     FROM influencer_profiles
     WHERE influencer_id = ?
     `,
@@ -5651,6 +5693,7 @@ function getCollaboratedRowForInfluencer(influencerId) {
     assignee_conflict: assigneeInfo.assignee_conflict,
     influencer_remark: profile?.influencer_remark || '',
     email: profile?.email || '',
+    phone: profile?.phone || '',
     fulfillment_progress: profile?.fulfillment_progress || '',
     pinned: profile && Number(profile.pinned) === 1 ? 1 : 0,
     pinned_at: profile?.pinned_at || '',
@@ -5669,7 +5712,7 @@ function enrichRecordsForInfluencerDetail(rows, influencerId) {
   const id = resolveCanonicalInfluencerId(influencerId) || String(influencerId || '').trim();
   const profile = queryOne(
     `
-    SELECT influencer_id, tags, assignee, email
+    SELECT influencer_id, tags, assignee, email, phone
     FROM influencer_profiles
     WHERE influencer_id = ?
     `,
@@ -5678,6 +5721,7 @@ function enrichRecordsForInfluencerDetail(rows, influencerId) {
   const assigneeInfo = resolveAssigneeInfoForInfluencer(id, profile);
   const tags = profile?.tags ? normalizeTagsValue(profile.tags) : '';
   const email = profile?.email || '';
+  const phone = profile?.phone || '';
   const sampleOrderMaps = buildSampleOrderIndexMapsForInfluencer(id);
   const skuModelMap = getSkuModelLookupMap();
   const aliasKeys = getInfluencerAliasKeys(id);
@@ -5703,6 +5747,7 @@ function enrichRecordsForInfluencerDetail(rows, influencerId) {
     row.assignee_conflict = assigneeInfo.assignee_conflict;
     row.assignee = assigneeInfo.assignee || row.assignee || '';
     row.email = email;
+    row.phone = phone;
     row.influencer_mixed_audit = false;
     row.influencer_application_count = list.length;
     row.influencer_applications = [];
@@ -6808,7 +6853,9 @@ module.exports = {
   getInfluencerFollowUpSummaryMap,
   getInfluencerFollowUpCountMap,
   getInfluencerEmailMap,
+  getInfluencerPhoneMap,
   updateInfluencerProfileEmail,
+  updateInfluencerProfilePhone,
   batchScrapeInfluencerEmails,
   batchSaveInfluencerEmails,
   filterInfluencerIdsNeedingEmailScrape,

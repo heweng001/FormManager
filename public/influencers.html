@@ -444,8 +444,8 @@
         isCollaborated: !!record.is_collaborated,
       });
       const badge = renderInfluencerApplicationCountBadge(record, { minCount: 2 });
-      const email = renderInfluencerEmailInline(record.influencer_id, record.email, record);
-      return `<span class="erp-influencer-id-wrap">${idCell}${badge}${email}</span>`;
+      const contacts = renderInfluencerContactIcons(record.influencer_id, record);
+      return `<span class="erp-influencer-id-wrap">${idCell}${badge}${contacts}</span>`;
     }
 
     function openInfluencerDetailFromList(recordId, influencerId) {
@@ -677,7 +677,7 @@
         : renderInfluencerIdCell(influencerId, pinned, renderInfluencerLink);
       if (record) recordsCache.set(String(record.id), record);
       const badge = record ? renderInfluencerApplicationCountBadge(record, { minCount: 2 }) : '';
-      const email = record ? renderInfluencerEmailInline(record.influencer_id, record.email, record) : '';
+      const contacts = record ? renderInfluencerContactIcons(record.influencer_id, record) : '';
       const emptyCells = Array.from({ length: GROUP_HEADER_MIDDLE_AFTER_TAGS }, () => '<td class="erp-group-header-empty"></td>').join('');
       const tagsCell = record
         ? `<td class="cell-tags">${renderTagsCell(record.influencer_id, record.tags)}</td>`
@@ -686,7 +686,7 @@
         <td class="cell-checkbox"></td>
         <td class="cell-id erp-group-header-id">
           <button type="button" class="erp-group-toggle" data-group-key="${escapeAttr(groupKey)}" aria-expanded="true" aria-label="展开或收起申请">▼</button>
-          <span class="erp-influencer-id-wrap">${idCell}${badge}${email}</span>
+          <span class="erp-influencer-id-wrap">${idCell}${badge}${contacts}</span>
         </td>
         ${tagsCell}
         ${emptyCells}
@@ -1128,6 +1128,14 @@
         if (String(record.influencer_id || '') === String(influencerId)) {
           record.email = email;
         }
+      });
+    };
+
+    window.onInfluencerContactSaved = (influencerId, type, value) => {
+      recordsCache.forEach((record) => {
+        if (String(record.influencer_id || '') !== String(influencerId)) return;
+        if (type === 'email') record.email = value;
+        if (type === 'phone') record.phone = value;
       });
     };
 

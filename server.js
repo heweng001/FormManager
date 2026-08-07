@@ -111,6 +111,7 @@ const {
   toggleInfluencerProfilePin,
   batchUpdateInfluencerAssignees,
   updateInfluencerProfileEmail,
+  updateInfluencerProfilePhone,
   FULFILLMENT_PROGRESS_OPTIONS,
   formatBeijingDateTime,
   getStaffMailSettingsPublic,
@@ -1346,6 +1347,9 @@ app.patch('/api/influencer-profiles/:influencerId', requireAuth, async (req, res
     }
     if (req.body?.email !== undefined) {
       await updateInfluencerProfileEmail(influencerId, toCellValue(req.body.email), req.user.name);
+    }
+    if (req.body?.phone !== undefined) {
+      await updateInfluencerProfilePhone(influencerId, toCellValue(req.body.phone), req.user.name);
     }
     if (req.body?.toggle_pin) {
       const result = await toggleInfluencerProfilePin(influencerId, req.user.name);

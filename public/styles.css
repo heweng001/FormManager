@@ -512,6 +512,113 @@ input.erp-input.erp-date-input {
   font-weight: 600;
 }
 
+.erp-influencer-id--has-audit,
+.erp-influencer-id--has-audit .erp-link-external {
+  color: #0f766e;
+  font-weight: 600;
+}
+
+.erp-influencer-id--no-audit,
+.erp-influencer-id--no-audit .erp-link-external {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.erp-contact-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.erp-contact-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.erp-contact-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.erp-contact-icon.is-empty {
+  color: #cbd5e1;
+  border-color: #e2e8f0;
+}
+
+.erp-contact-icon.is-empty:hover {
+  color: #94a3b8;
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.erp-contact-icon.is-filled {
+  color: #0f766e;
+  border-color: #99f6e4;
+  background: #f0fdfa;
+}
+
+.erp-contact-icon.is-filled:hover {
+  color: #0d9488;
+  background: #ccfbf1;
+}
+
+.erp-contact-fill-popover {
+  position: absolute;
+  z-index: 1200;
+  width: 240px;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.erp-contact-fill-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.erp-contact-fill-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+
+.erp-contact-fill-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.erp-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  z-index: 1400;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.88);
+  color: #fff;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.erp-toast.hidden {
+  display: none;
+}
+
 .erp-audit-app-badge {
   flex-shrink: 0;
   min-width: 18px;
@@ -2045,10 +2152,8 @@ input.erp-input.erp-date-input {
   font-size: 11px;
 }
 
-.erp-table-collab .cell-id .erp-influencer-email-inline {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 96px;
+.erp-table-collab .cell-id .erp-contact-icons {
+  flex-shrink: 0;
 }
 
 .erp-table-collab .cell-email {

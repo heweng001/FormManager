@@ -1299,9 +1299,287 @@ function renderEmailSendStatusBadge(row) {
   return `<span class="${cls}" title="${escapeAttr(title)}">${escapeHtml(date)}</span>`;
 }
 
+function hasInfluencerContactValue(value) {
+  const text = String(value || '').trim();
+  return !!text && text !== '未留';
+}
+
+function showErpToast(message, durationMs = 1600) {
+  let el = document.getElementById('erpToast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'erpToast';
+    el.className = 'erp-toast hidden';
+    document.body.appendChild(el);
+  }
+  el.textContent = String(message || '');
+  el.classList.remove('hidden');
+  clearTimeout(showErpToast._timer);
+  showErpToast._timer = setTimeout(() => el.classList.add('hidden'), durationMs);
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || '');
+  if (!value) return false;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+  const ta = document.createElement('textarea');
+  ta.value = value;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand('copy');
+  document.body.removeChild(ta);
+  return ok;
+}
+
+function renderContactIconSvg(type) {
+  if (type === 'phone') {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1.1-.2 1.2.4 2.5.6 3.8.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.6.6 3.8.1.4 0 .8-.3 1.1L6.6 10.8z"/></svg>`;
+  }
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5L4 8V6l8 5 8-5v2z"/></svg>`;
+}
+
+function renderInfluencerContactIcon(influencerId, type, value) {
+  const filled = hasInfluencerContactValue(value);
+  const label = type === 'phone' ? '手机号' : '邮箱';
+  const title = filled ? `${label}：${String(value).trim()}（点击复制）` : `点击填写${label}`;
+  const cls = `erp-contact-icon erp-contact-icon--${type}${filled ? ' is-filled' : ' is-empty'}`;
+  return `<button type="button" class="${cls}" data-contact-type="${escapeAttr(type)}" data-influencer-id="${escapeAttr(String(influencerId || ''))}" data-contact-value="${escapeAttr(filled ? String(value).trim() : '')}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">${renderContactIconSvg(type)}</button>`;
+}
+
+function renderInfluencerContactIcons(influencerId, row = {}) {
+  if (!influencerId) return '';
+  const email = row?.email;
+  const phone = row?.phone;
+  // Keep layout stable even when fields are empty strings from API.
+  if (email === undefined && phone === undefined) return '';
+  return `<span class="erp-contact-icons">${renderInfluencerContactIcon(influencerId, 'email', email)}${renderInfluencerContactIcon(influencerId, 'phone', phone)}${renderEmailSendStatusBadge(row)}</span>`;
+}
+
+/** @deprecated use renderInfluencerContactIcons */
 function renderInfluencerEmailInline(influencerId, email, row) {
-  if (email === undefined) return '';
-  return `<span class="erp-influencer-email-inline">${renderInfluencerEmailInput(influencerId, email)}${renderEmailSendStatusBadge(row)}</span>`;
+  return renderInfluencerContactIcons(influencerId, { ...(row || {}), email });
+}
+
+function closeContactFillPopover() {
+  document.getElementById('erpContactFillPopover')?.remove();
+}
+
+function openContactFillPopover(anchorBtn) {
+  closeContactFillPopover();
+  const influencerId = String(anchorBtn?.dataset?.influencerId || '').trim();
+  const type = String(anchorBtn?.dataset?.contactType || '').trim();
+  if (!influencerId || !['email', 'phone'].includes(type)) return;
+  const label = type === 'phone' ? '手机号' : '邮箱';
+  const pop = document.createElement('div');
+  pop.id = 'erpContactFillPopover';
+  pop.className = 'erp-contact-fill-popover';
+  pop.innerHTML = `
+    <label class="erp-contact-fill-label">${escapeHtml(label)}</label>
+    <input type="text" class="erp-input erp-contact-fill-input" placeholder="填写${escapeAttr(label)}" autocomplete="off" />
+    <div class="erp-contact-fill-actions">
+      <button type="button" class="erp-btn erp-btn-primary erp-btn-sm erp-contact-fill-save">保存</button>
+      <button type="button" class="erp-btn erp-btn-secondary erp-btn-sm erp-contact-fill-cancel">取消</button>
+    </div>
+  `;
+  document.body.appendChild(pop);
+  const rect = anchorBtn.getBoundingClientRect();
+  const top = Math.min(window.innerHeight - 120, rect.bottom + 6);
+  const left = Math.min(window.innerWidth - 260, Math.max(8, rect.left));
+  pop.style.top = `${top + window.scrollY}px`;
+  pop.style.left = `${left + window.scrollX}px`;
+  const input = pop.querySelector('.erp-contact-fill-input');
+  const saveBtn = pop.querySelector('.erp-contact-fill-save');
+  const cancelBtn = pop.querySelector('.erp-contact-fill-cancel');
+  const save = async () => {
+    const value = String(input.value || '').trim();
+    if (!value) {
+      showErpToast(`请填写${label}`);
+      input.focus();
+      return;
+    }
+    saveBtn.disabled = true;
+    try {
+      const body = type === 'phone' ? { phone: value } : { email: value };
+      const { res, data } = await api(`/api/influencer-profiles/${encodeURIComponent(influencerId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(data.message || '保存失败');
+      updateContactIconInDom(influencerId, type, value);
+      if (typeof window.onInfluencerContactSaved === 'function') {
+        window.onInfluencerContactSaved(influencerId, type, value);
+      }
+      if (type === 'email' && typeof window.onInfluencerEmailSaved === 'function') {
+        window.onInfluencerEmailSaved(influencerId, value);
+      }
+      closeContactFillPopover();
+      showErpToast(`${label}已保存`);
+    } catch (err) {
+      alert(err.message || '保存失败');
+      saveBtn.disabled = false;
+    }
+  };
+  cancelBtn.addEventListener('click', () => closeContactFillPopover());
+  saveBtn.addEventListener('click', save);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      save();
+    } else if (e.key === 'Escape') {
+      closeContactFillPopover();
+    }
+  });
+  setTimeout(() => input.focus(), 0);
+}
+
+function updateContactIconInDom(influencerId, type, value) {
+  const id = String(influencerId || '');
+  document.querySelectorAll('.erp-contact-icon').forEach((btn) => {
+    if (btn.dataset.influencerId !== id || btn.dataset.contactType !== type) return;
+    const filled = hasInfluencerContactValue(value);
+    const label = type === 'phone' ? '手机号' : '邮箱';
+    btn.classList.toggle('is-filled', filled);
+    btn.classList.toggle('is-empty', !filled);
+    btn.dataset.contactValue = filled ? String(value).trim() : '';
+    btn.title = filled ? `${label}：${String(value).trim()}（点击复制）` : `点击填写${label}`;
+    btn.setAttribute('aria-label', btn.title);
+  });
+  document.querySelectorAll('.editable-contact').forEach((input) => {
+    if (input.dataset.influencerId !== id || input.dataset.contactType !== type) return;
+    input.value = String(value || '').trim();
+    input.dataset.lastSaved = input.value;
+    input.title = input.value;
+  });
+}
+
+function bindInfluencerContactIcons(root = document) {
+  if (bindInfluencerContactIcons._bound) return;
+  bindInfluencerContactIcons._bound = true;
+  document.addEventListener('click', async (e) => {
+    const pop = document.getElementById('erpContactFillPopover');
+    if (pop && !pop.contains(e.target) && !e.target.closest('.erp-contact-icon')) {
+      closeContactFillPopover();
+    }
+    const btn = e.target.closest('.erp-contact-icon');
+    if (!btn || !(root === document || root.contains(btn))) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const value = String(btn.dataset.contactValue || '').trim();
+    const type = String(btn.dataset.contactType || '').trim();
+    const label = type === 'phone' ? '手机号' : '邮箱';
+    if (hasInfluencerContactValue(value)) {
+      try {
+        const ok = await copyTextToClipboard(value);
+        showErpToast(ok ? `已复制${label}` : '复制失败');
+      } catch (_err) {
+        showErpToast('复制失败');
+      }
+      return;
+    }
+    openContactFillPopover(btn);
+  });
+}
+
+function renderInfluencerContactDetailField(influencerId, type, value) {
+  const label = type === 'phone' ? '手机号' : '邮箱';
+  const text = hasInfluencerContactValue(value) ? String(value).trim() : '';
+  return `<div class="erp-editable-wrap"><input type="text" class="erp-editable editable-contact" data-contact-type="${escapeAttr(type)}" data-influencer-id="${escapeAttr(String(influencerId || ''))}" value="${escapeAttr(text)}" placeholder="${escapeAttr(label)}" title="${escapeAttr(text)}" /><span class="erp-save-status save-status hidden"></span></div>`;
+}
+
+const influencerContactSaveTimers = new Map();
+
+async function saveInfluencerContactField(input) {
+  const influencerId = String(input?.dataset?.influencerId || '').trim();
+  const type = String(input?.dataset?.contactType || '').trim();
+  if (!influencerId || !['email', 'phone'].includes(type)) return;
+  const timerKey = `${type}-${influencerId}`;
+  if (influencerContactSaveTimers.has(timerKey)) {
+    clearTimeout(influencerContactSaveTimers.get(timerKey));
+    influencerContactSaveTimers.delete(timerKey);
+  }
+  const value = input.value.trim();
+  if (input.dataset.lastSaved === value) return;
+  const status = input.parentElement?.querySelector('.save-status');
+  const body = type === 'phone' ? { phone: value } : { email: value };
+  const { res, data } = await api(`/api/influencer-profiles/${encodeURIComponent(influencerId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    alert(data.message || '保存失败');
+    input.value = input.dataset.lastSaved || '';
+    input.title = input.dataset.lastSaved || '';
+    return;
+  }
+  input.dataset.lastSaved = value;
+  input.title = value;
+  updateContactIconInDom(influencerId, type, value);
+  if (status) {
+    status.textContent = '已保存';
+    status.classList.remove('hidden');
+    setTimeout(() => status.classList.add('hidden'), 1200);
+  }
+  if (typeof window.onInfluencerContactSaved === 'function') {
+    window.onInfluencerContactSaved(influencerId, type, value);
+  }
+  if (type === 'email' && typeof window.onInfluencerEmailSaved === 'function') {
+    window.onInfluencerEmailSaved(influencerId, value);
+  }
+}
+
+function scheduleInfluencerContactSave(input) {
+  const influencerId = String(input?.dataset?.influencerId || '').trim();
+  const type = String(input?.dataset?.contactType || '').trim();
+  if (!influencerId || !type) return;
+  const timerKey = `${type}-${influencerId}`;
+  if (influencerContactSaveTimers.has(timerKey)) clearTimeout(influencerContactSaveTimers.get(timerKey));
+  influencerContactSaveTimers.set(
+    timerKey,
+    setTimeout(() => {
+      influencerContactSaveTimers.delete(timerKey);
+      saveInfluencerContactField(input);
+    }, 600)
+  );
+}
+
+function bindInfluencerContactDetailFields(root = document) {
+  root.querySelectorAll('.editable-contact').forEach((input) => {
+    if (input.dataset.contactBound === '1') return;
+    input.dataset.contactBound = '1';
+    input.dataset.lastSaved = input.value.trim();
+    input.addEventListener('input', () => scheduleInfluencerContactSave(input));
+    input.addEventListener('blur', () => saveInfluencerContactField(input));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        input.blur();
+      }
+    });
+  });
+}
+
+function bindInfluencerEmailFields(root = document) {
+  bindInfluencerContactIcons(root);
+  bindInfluencerContactDetailFields(root);
+  root.querySelectorAll('.editable-email').forEach((input) => {
+    if (input.dataset.emailBound === '1') return;
+    input.dataset.emailBound = '1';
+    input.dataset.lastSaved = input.value.trim();
+    input.addEventListener('input', () => scheduleInfluencerEmailSave(input));
+    input.addEventListener('blur', () => saveInfluencerEmailField(input));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        input.blur();
+      }
+    });
+  });
 }
 
 async function toggleInfluencerPin(influencerId) {
@@ -1627,22 +1905,6 @@ function scheduleInfluencerEmailSave(input) {
       saveInfluencerEmailField(input);
     }, 600)
   );
-}
-
-function bindInfluencerEmailFields(root = document) {
-  root.querySelectorAll('.editable-email').forEach((input) => {
-    if (input.dataset.emailBound === '1') return;
-    input.dataset.emailBound = '1';
-    input.dataset.lastSaved = input.value.trim();
-    input.addEventListener('input', () => scheduleInfluencerEmailSave(input));
-    input.addEventListener('blur', () => saveInfluencerEmailField(input));
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        input.blur();
-      }
-    });
-  });
 }
 
 function renderLastImportSummary(lastImport) {
@@ -2592,11 +2854,15 @@ function renderInfluencerMergedDetailHtml(auditRecords, collabRow, renameLogs = 
         ? collabRow.assignee_conflict
         : !!primary.assignee_conflict,
     tags: (collabRow && collabRow.tags != null ? collabRow.tags : primary.tags) || '',
+    email: (collabRow && collabRow.email != null ? collabRow.email : primary.email) || '',
+    phone: (collabRow && collabRow.phone != null ? collabRow.phone : primary.phone) || '',
   };
   const overviewFields = [
     ['达人id', renderInfluencerIdEditSectionHtml(row.influencer_id, renameLogs)],
     ['负责人', renderAssigneeDetailValue(row)],
     ['标签', renderTagsDisplayReadonly(row.tags)],
+    ['邮箱', renderInfluencerContactDetailField(row.influencer_id, 'email', row.email)],
+    ['手机号', renderInfluencerContactDetailField(row.influencer_id, 'phone', row.phone)],
     ['履约进展', escapeHtml(row.fulfillment_progress || '-')],
     ['达人备注', escapeHtml(row.influencer_remark || '-')],
     ['发视频数', escapeHtml(String(row.published_video_count ?? 0))],
@@ -3021,6 +3287,7 @@ async function loadInfluencerDetailContent({
       : payload.collab || (await fetchCollabRowForDetail(resolvedInfluencerId));
   if (collab) collab.influencer_id = resolvedInfluencerId;
   auditEl.innerHTML = renderInfluencerMergedDetailHtml(auditRecords, collab, renameLogs);
+  bindInfluencerContactDetailFields(auditEl);
 
   if (enableFollowUp && followUpEl) {
     if (Array.isArray(payload.follow_ups)) {
