@@ -25,6 +25,7 @@
     let urlSampleDateFrom = '';
     let urlSampleDateTo = '';
     let urlPublishAfterSample = '';
+    let urlIncludeAllocationTag = '';
 
     function buildAllianceOrdersLink(contentId, fullRefund = false) {
       const params = new URLSearchParams();
@@ -302,6 +303,7 @@
       urlSampleDateFrom = params.get('sample_date_from') || '';
       urlSampleDateTo = params.get('sample_date_to') || '';
       urlPublishAfterSample = params.get('publish_after_sample') === '1' ? '1' : '';
+      urlIncludeAllocationTag = params.get('include_allocation_tag') === '1' ? '1' : '';
     }
 
     function getBatchFilters() {
@@ -320,6 +322,7 @@
         sample_date_from: urlSampleDateFrom,
         sample_date_to: urlSampleDateTo,
         publish_after_sample: urlPublishAfterSample,
+        include_allocation_tag: urlIncludeAllocationTag,
         sort_field: sortField,
         sort_order: sortOrder,
         page: currentPage,

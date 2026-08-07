@@ -2629,7 +2629,7 @@ function buildInfluencerVideosIndexByCreatorKey() {
     WHERE TRIM(COALESCE(creator_username, '')) != ''
     `
   ).forEach((row) => {
-    const key = normalizeMatchKey(row.creator_username);
+    const key = resolveCanonicalInfluencerKey(row.creator_username);
     if (!key) return;
     if (!index.has(key)) index.set(key, []);
     index.get(key).push({
@@ -2678,7 +2678,8 @@ function getPublishedContentIdsAfterSampleForAssignee(assignee, dateFrom, dateTo
     if (isAllocationTaggedInfluencerForStats(meta.tags, filters)) return;
     const assignees = getSampleStatsAssigneeTargets(meta, { scope_assignee: filters.scope_assignee });
     if (!assignees.includes(assignee)) return;
-    const influencerKey = normalizeMatchKey(order.buyer_username);
+    const influencerKey = resolveCanonicalInfluencerKey(order.buyer_username);
+    if (!influencerKey) return;
     if (!sampledInfluencers.has(influencerKey)) sampledInfluencers.set(influencerKey, new Set());
     sampledInfluencers.get(influencerKey).add(ymd);
   });
@@ -3787,7 +3788,21 @@ function buildAllianceOrderWhere(filters = {}) {
     conditions.push('import_time = ?');
     params.push(filters.import_time);
   }
-  if (filters.assignee_filter) {
+  if (
+    filters.payment_after_sample &&
+    filters.sample_date_from &&
+    filters.sample_date_to
+  ) {
+    // Assignee / allocation filters are applied inside matched IDs (alias-aware).
+    const matchedIds = getAllianceOrderIdsMatchingPaymentAfterSample(filters);
+    if (!matchedIds.length) {
+      conditions.push('1 = 0');
+    } else {
+      const placeholders = matchedIds.map(() => '?').join(', ');
+      conditions.push(`id IN (${placeholders})`);
+      params.push(...matchedIds);
+    }
+  } else if (filters.assignee_filter) {
     const creators = getCreatorUsernamesForAssignee(filters.assignee_filter);
     if (!creators.length) {
       conditions.push('1 = 0');
@@ -3805,23 +3820,6 @@ function buildAllianceOrderWhere(filters = {}) {
       conditions.push(`creator_username IN (${placeholders})`);
       params.push(...creators);
     }
-  }
-  if (
-    filters.payment_after_sample &&
-    filters.sample_date_from &&
-    filters.sample_date_to
-  ) {
-    conditions.push(`EXISTS (
-      SELECT 1 FROM sample_orders so
-      WHERE TRIM(COALESCE(so.buyer_username, '')) != ''
-        AND lower(trim(so.buyer_username)) = lower(trim(alliance_orders.creator_username))
-        AND TRIM(COALESCE(so.created_time_ymd, '')) != ''
-        AND so.created_time_ymd >= ?
-        AND so.created_time_ymd <= ?
-        AND TRIM(COALESCE(alliance_orders.payment_time_ymd, '')) != ''
-        AND alliance_orders.payment_time_ymd > so.created_time_ymd
-    )`);
-    params.push(filters.sample_date_from, filters.sample_date_to);
   }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   return { where, params };
@@ -4062,6 +4060,10 @@ function getOrderedAfterSampleInfluencerKeys(filters = {}) {
 
   const metaMap = buildInfluencerMetaMapForStats();
   const sampledInfluencers = new Map();
+  const statsFilters = {
+    include_allocation_tag: filters.include_allocation_tag,
+    scope_assignee: filters.scope_assignee,
+  };
 
   queryRows(
     `SELECT buyer_username, created_time_ymd, created_time_raw
@@ -4071,18 +4073,25 @@ function getOrderedAfterSampleInfluencerKeys(filters = {}) {
     const ymd = resolveSampleOrderYmd(order);
     if (!ymdInRangeForStats(ymd, sampleFrom, sampleTo)) return;
     const meta = getInfluencerMetaForStats(metaMap, order.buyer_username, order.buyer_username);
+    if (isAllocationTaggedInfluencerForStats(meta.tags, statsFilters)) return;
     if (filters.assignee_filter === SAMPLE_STATS_EMPTY_ASSIGNEE_KEY) {
       if (meta.assignees.length) return;
     } else if (filters.assignee_filter && !meta.assignees.includes(filters.assignee_filter)) return;
     if (filters.scope_assignee && !meta.assignees.includes(filters.scope_assignee)) return;
-    if ((filters.assignee_filter || filters.scope_assignee) && !meta.assignees.length && filters.assignee_filter !== SAMPLE_STATS_EMPTY_ASSIGNEE_KEY) return;
+    if (
+      (filters.assignee_filter || filters.scope_assignee) &&
+      !meta.assignees.length &&
+      filters.assignee_filter !== SAMPLE_STATS_EMPTY_ASSIGNEE_KEY
+    ) {
+      return;
+    }
     const influencerKey = resolveCanonicalInfluencerKey(order.buyer_username);
+    if (!influencerKey) return;
     if (!sampledInfluencers.has(influencerKey)) sampledInfluencers.set(influencerKey, new Set());
     sampledInfluencers.get(influencerKey).add(ymd);
   });
 
   const orderedKeys = new Set();
-  rebuildAllianceOrderDerivedFields();
   queryRows(
     `
     SELECT creator_username, payment_time_ymd, payment_time_raw
@@ -4093,7 +4102,10 @@ function getOrderedAfterSampleInfluencerKeys(filters = {}) {
     const influencerKey = resolveCanonicalInfluencerKey(order.creator_username);
     const sampleDates = sampledInfluencers.get(influencerKey);
     if (!sampleDates || !sampleDates.size) return;
+    const meta = getInfluencerMetaForStats(metaMap, order.creator_username, order.creator_username);
+    if (isAllocationTaggedInfluencerForStats(meta.tags, statsFilters)) return;
     const paymentYmd = resolveAlliancePaymentYmd(order);
+    if (!paymentYmd) return;
     if ([...sampleDates].some((sampleYmd) => paymentYmd > sampleYmd)) {
       orderedKeys.add(influencerKey);
     }
@@ -4101,12 +4113,86 @@ function getOrderedAfterSampleInfluencerKeys(filters = {}) {
   return orderedKeys;
 }
 
+/** Alliance order IDs matching寄样统计「出单」口径（含达人别名、「分配」标签过滤）。 */
+function getAllianceOrderIdsMatchingPaymentAfterSample(filters = {}) {
+  const sampleFrom = String(filters.sample_date_from || '').trim();
+  const sampleTo = String(filters.sample_date_to || '').trim();
+  if (!sampleFrom || !sampleTo) return [];
+
+  const metaMap = buildInfluencerMetaMapForStats();
+  const statsFilters = {
+    include_allocation_tag: filters.include_allocation_tag,
+    scope_assignee: filters.scope_assignee,
+  };
+  const assignee = filters.assignee_filter;
+  const sampledInfluencers = new Map();
+
+  queryRows(
+    `SELECT buyer_username, created_time_ymd, created_time_raw
+     FROM sample_orders
+     WHERE TRIM(COALESCE(buyer_username, '')) != ''`
+  ).forEach((order) => {
+    const ymd = resolveSampleOrderYmd(order);
+    if (!ymdInRangeForStats(ymd, sampleFrom, sampleTo)) return;
+    const meta = getInfluencerMetaForStats(metaMap, order.buyer_username, order.buyer_username);
+    if (isAllocationTaggedInfluencerForStats(meta.tags, statsFilters)) return;
+    const assignees = getSampleStatsAssigneeTargets(meta, statsFilters);
+    if (!assignees.length) return;
+    if (assignee === SAMPLE_STATS_EMPTY_ASSIGNEE_KEY) {
+      if (assignees.length !== 1 || assignees[0] !== SAMPLE_STATS_EMPTY_ASSIGNEE_KEY) return;
+    } else if (assignee && !assignees.includes(assignee)) {
+      return;
+    }
+    const influencerKey = resolveCanonicalInfluencerKey(order.buyer_username);
+    if (!influencerKey) return;
+    if (!sampledInfluencers.has(influencerKey)) sampledInfluencers.set(influencerKey, new Set());
+    sampledInfluencers.get(influencerKey).add(ymd);
+  });
+
+  const matchedIds = [];
+  queryRows(
+    `
+    SELECT id, creator_username, payment_time_ymd, payment_time_raw
+    FROM alliance_orders
+    WHERE TRIM(COALESCE(creator_username, '')) != ''
+    `
+  ).forEach((order) => {
+    const influencerKey = resolveCanonicalInfluencerKey(order.creator_username);
+    const sampleDates = sampledInfluencers.get(influencerKey);
+    if (!sampleDates || !sampleDates.size) return;
+    const meta = getInfluencerMetaForStats(metaMap, order.creator_username, order.creator_username);
+    if (isAllocationTaggedInfluencerForStats(meta.tags, statsFilters)) return;
+    if (assignee === SAMPLE_STATS_EMPTY_ASSIGNEE_KEY) {
+      if (meta.assignees.length) return;
+    } else if (assignee && !meta.assignees.includes(assignee)) {
+      return;
+    }
+    const paymentYmd = resolveAlliancePaymentYmd(order);
+    if (!paymentYmd) return;
+    if ([...sampleDates].some((sampleYmd) => paymentYmd > sampleYmd)) {
+      matchedIds.push(order.id);
+    }
+  });
+  return matchedIds;
+}
+
 function getSampleShipmentStats(filters = {}) {
-  backfillSampleOrderYmdFromRaw();
   const range = resolveSampleStatsDateRange(filters);
   const metaMap = buildInfluencerMetaMapForStats();
   const auditBounds = ymdToDateTimeBounds(range.start, range.end);
   const buckets = new Map();
+  const global = {
+    audit: { Y: 0, N: 0, X: 0 },
+    sample_count: 0,
+    sampledInfluencers: new Map(),
+    allianceByInfluencer: new Map(),
+  };
+  const staffUnique = {
+    audit: { Y: 0, N: 0, X: 0 },
+    sample_count: 0,
+    sampledInfluencers: new Map(),
+    allianceByInfluencer: new Map(),
+  };
 
   const ensureBucket = (assignee) => {
     if (!buckets.has(assignee)) {
@@ -4119,6 +4205,24 @@ function getSampleShipmentStats(filters = {}) {
     }
     return buckets.get(assignee);
   };
+
+  const addSampleDate = (map, influencerKey, ymd) => {
+    if (!map.has(influencerKey)) map.set(influencerKey, new Set());
+    map.get(influencerKey).add(ymd);
+  };
+
+  const addAllianceOrder = (map, influencerKey, order) => {
+    if (!map.has(influencerKey)) {
+      map.set(influencerKey, { orderCount: 0, videos: new Set() });
+    }
+    const agg = map.get(influencerKey);
+    agg.orderCount += 1;
+    const contentId = String(order.content_id || '').trim();
+    if (contentId) agg.videos.add(contentId);
+  };
+
+  const hasStaffAssignee = (assignees) =>
+    assignees.some((name) => name !== SAMPLE_STATS_EMPTY_ASSIGNEE_KEY);
 
   queryRows(
     `SELECT id, influencer_id, assignee, audit_status, audit_status_at
@@ -4135,6 +4239,8 @@ function getSampleShipmentStats(filters = {}) {
     if (isAllocationTaggedInfluencerForStats(meta.tags, filters)) return;
     const assignees = getSampleStatsAssigneeTargets(meta, filters);
     if (!assignees.length) return;
+    global.audit[status] += 1;
+    if (hasStaffAssignee(assignees)) staffUnique.audit[status] += 1;
     assignees.forEach((assignee) => {
       ensureBucket(assignee).audit[status] += 1;
     });
@@ -4152,17 +4258,20 @@ function getSampleShipmentStats(filters = {}) {
     const assignees = getSampleStatsAssigneeTargets(meta, filters);
     if (!assignees.length) return;
     const influencerKey = resolveCanonicalInfluencerKey(order.buyer_username);
+    if (!influencerKey) return;
+    global.sample_count += 1;
+    addSampleDate(global.sampledInfluencers, influencerKey, ymd);
+    if (hasStaffAssignee(assignees)) {
+      staffUnique.sample_count += 1;
+      addSampleDate(staffUnique.sampledInfluencers, influencerKey, ymd);
+    }
     assignees.forEach((assignee) => {
       const bucket = ensureBucket(assignee);
       bucket.sample_count += 1;
-      if (!bucket.sampledInfluencers.has(influencerKey)) {
-        bucket.sampledInfluencers.set(influencerKey, new Set());
-      }
-      bucket.sampledInfluencers.get(influencerKey).add(ymd);
+      addSampleDate(bucket.sampledInfluencers, influencerKey, ymd);
     });
   });
 
-  rebuildAllianceOrderDerivedFields();
   const videoIndex = buildInfluencerVideosIndexByCreatorKey();
   queryRows(
     `
@@ -4174,10 +4283,29 @@ function getSampleShipmentStats(filters = {}) {
     const paymentYmd = resolveAlliancePaymentYmd(order);
     if (!paymentYmd) return;
     const influencerKey = resolveCanonicalInfluencerKey(order.creator_username);
+    if (!influencerKey) return;
     const meta = getInfluencerMetaForStats(metaMap, order.creator_username, order.creator_username);
     if (isAllocationTaggedInfluencerForStats(meta.tags, filters)) return;
     const assignees = getSampleStatsAssigneeTargets(meta, filters);
     if (!assignees.length) return;
+
+    const globalSampleDates = global.sampledInfluencers.get(influencerKey);
+    const matchesGlobal =
+      globalSampleDates &&
+      globalSampleDates.size &&
+      [...globalSampleDates].some((sampleYmd) => paymentYmd > sampleYmd);
+    if (matchesGlobal) {
+      addAllianceOrder(global.allianceByInfluencer, influencerKey, order);
+    }
+
+    const staffSampleDates = staffUnique.sampledInfluencers.get(influencerKey);
+    if (
+      staffSampleDates &&
+      staffSampleDates.size &&
+      [...staffSampleDates].some((sampleYmd) => paymentYmd > sampleYmd)
+    ) {
+      addAllianceOrder(staffUnique.allianceByInfluencer, influencerKey, order);
+    }
 
     assignees.forEach((assignee) => {
       const bucket = ensureBucket(assignee);
@@ -4185,17 +4313,7 @@ function getSampleShipmentStats(filters = {}) {
       if (!sampleDates || !sampleDates.size) return;
       const hasValidSample = [...sampleDates].some((sampleYmd) => paymentYmd > sampleYmd);
       if (!hasValidSample) return;
-
-      if (!bucket.allianceByInfluencer.has(influencerKey)) {
-        bucket.allianceByInfluencer.set(influencerKey, {
-          orderCount: 0,
-          videos: new Set(),
-        });
-      }
-      const agg = bucket.allianceByInfluencer.get(influencerKey);
-      agg.orderCount += 1;
-      const contentId = String(order.content_id || '').trim();
-      if (contentId) agg.videos.add(contentId);
+      addAllianceOrder(bucket.allianceByInfluencer, influencerKey, order);
     });
   });
 
@@ -4212,8 +4330,7 @@ function getSampleShipmentStats(filters = {}) {
     }
   }
 
-  const rows = assigneeNames.map((assignee) => {
-    const bucket = buckets.get(assignee);
+  const buildRowFromBucket = (assignee, bucket) => {
     if (!bucket) return finalizeSampleShipmentStatsRow({ assignee, ...createEmptySampleShipmentStatsRow() });
 
     let orderedInfluencerCount = 0;
@@ -4240,7 +4357,34 @@ function getSampleShipmentStats(filters = {}) {
       video_count: videoCount,
       order_count: orderCount,
     });
-  });
+  };
+
+  const buildTotalsFromMaps = (sampledMap, allianceMap, audit, sampleCount) => {
+    let orderedInfluencerCount = 0;
+    let videoCount = 0;
+    let orderCount = 0;
+    allianceMap.forEach((agg) => {
+      if (agg.orderCount > 0) {
+        orderedInfluencerCount += 1;
+        videoCount += agg.videos.size;
+        orderCount += agg.orderCount;
+      }
+    });
+    const publishedStats = computePublishedVideoStatsAfterSample(sampledMap, videoIndex);
+    return finalizeSampleShipmentStatsRow({
+      audit_approved: audit.Y,
+      audit_rejected: audit.N,
+      audit_tentative: audit.X,
+      sample_count: sampleCount,
+      published_video_count: publishedStats.published_video_count,
+      published_influencer_count: publishedStats.published_influencer_count,
+      ordered_influencer_count: orderedInfluencerCount,
+      video_count: videoCount,
+      order_count: orderCount,
+    });
+  };
+
+  const rows = assigneeNames.map((assignee) => buildRowFromBucket(assignee, buckets.get(assignee)));
 
   let staffRows = rows;
   let emptyAssigneeRow = null;
@@ -4252,10 +4396,23 @@ function getSampleShipmentStats(filters = {}) {
     staffRows = rows.filter((row) => row.assignee !== SAMPLE_STATS_EMPTY_ASSIGNEE_KEY);
   }
 
-  const staffTotals = sumSampleShipmentStatsRows(staffRows);
-  const grandTotals = showEmptyAssigneeRow
-    ? sumSampleShipmentStatsRows([staffTotals, emptyAssigneeRow])
-    : staffTotals;
+  const staffTotals = filters.scope_assignee
+    ? buildRowFromBucket(filters.scope_assignee, buckets.get(filters.scope_assignee))
+    : buildTotalsFromMaps(
+        staffUnique.sampledInfluencers,
+        staffUnique.allianceByInfluencer,
+        staffUnique.audit,
+        staffUnique.sample_count
+      );
+
+  const grandTotals = filters.scope_assignee
+    ? staffTotals
+    : buildTotalsFromMaps(
+        global.sampledInfluencers,
+        global.allianceByInfluencer,
+        global.audit,
+        global.sample_count
+      );
 
   return Promise.resolve({
     rows: staffRows,

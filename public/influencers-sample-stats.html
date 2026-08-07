@@ -44,7 +44,7 @@
         label: '出单达人数',
         group: 'alliance',
         linkType: 'collaborated',
-        help: '统计口径：在所选寄样时间段内已寄样的达人中，存在支付时间晚于寄样时间的联盟订单的达人数（按达人去重）。',
+        help: '统计口径：在所选寄样时间段内已寄样的达人中，存在支付时间晚于寄样时间的联盟订单的达人数（按达人去重；合计行按达人唯一计数，不因多负责人重复累加）。',
       },
       {
         key: 'video_count',
@@ -213,6 +213,7 @@
       params.set('sample_date_from', currentRange.start);
       params.set('sample_date_to', currentRange.end);
       params.set('payment_after_sample', '1');
+      if (includeAllocationTag) params.set('include_allocation_tag', '1');
       return `/alliance-orders.html?${params.toString()}`;
     }
 
@@ -224,6 +225,7 @@
       params.set('ordered_after_sample', '1');
       params.set('sample_date_from', currentRange.start);
       params.set('sample_date_to', currentRange.end);
+      if (includeAllocationTag) params.set('include_allocation_tag', '1');
       return `/influencers-collaborated.html?${params.toString()}`;
     }
 
@@ -234,6 +236,7 @@
       params.set('sample_date_from', currentRange.start);
       params.set('sample_date_to', currentRange.end);
       params.set('publish_after_sample', '1');
+      if (includeAllocationTag) params.set('include_allocation_tag', '1');
       return `/influencer-videos.html?${params.toString()}`;
     }
 

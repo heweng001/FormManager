@@ -563,6 +563,7 @@ function buildCollaboratedFilters(query, user) {
   filters.sample_date_from = toCellValue(query.sample_date_from);
   filters.sample_date_to = toCellValue(query.sample_date_to);
   filters.ordered_after_sample = toCellValue(query.ordered_after_sample) === '1';
+  filters.include_allocation_tag = toTruthyFlag(query.include_allocation_tag);
   if (!isManager(user)) {
     filters.scope_assignee = user.name;
   }
@@ -1823,6 +1824,7 @@ app.get('/api/alliance-orders', requireAuth, async (req, res) => {
       payment_after_sample: toCellValue(req.query.payment_after_sample) === '1',
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
+      include_allocation_tag: toTruthyFlag(req.query.include_allocation_tag),
       import_time: toCellValue(req.query.import_time),
       full_refund: toCellValue(req.query.full_refund) === '1' ? '1' : '',
       sort_field: ['payment_time', 'import_time', 'id'].includes(toCellValue(req.query.sort_field))
@@ -1864,6 +1866,7 @@ app.get('/api/alliance-orders/filter-options', requireAuth, async (req, res) => 
       payment_after_sample: toCellValue(req.query.payment_after_sample) === '1',
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
+      include_allocation_tag: toTruthyFlag(req.query.include_allocation_tag),
     };
     if (!isManager(req.user)) {
       filters.scope_assignee = req.user.name;
@@ -1973,6 +1976,7 @@ app.get('/api/influencer-videos', requireAuth, async (req, res) => {
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
       publish_after_sample: toCellValue(req.query.publish_after_sample),
+      include_allocation_tag: toTruthyFlag(req.query.include_allocation_tag),
       sort_field: toCellValue(req.query.sort_field),
       sort_order: toCellValue(req.query.sort_order),
       page: Math.max(1, parseInt(req.query.page, 10) || 1),
@@ -2004,6 +2008,7 @@ app.get('/api/influencer-videos/filter-options', requireAuth, async (req, res) =
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
       publish_after_sample: toCellValue(req.query.publish_after_sample),
+      include_allocation_tag: toTruthyFlag(req.query.include_allocation_tag),
     };
     const options = await getInfluencerVideoImportTimeOptions(filters);
     res.json({ success: true, ...options });
