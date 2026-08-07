@@ -1716,6 +1716,51 @@ input.erp-input.erp-date-input {
   cursor: pointer;
 }
 
+.erp-follow-up-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.erp-toolbar-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.erp-toolbar-dropdown {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  min-width: 128px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
+  z-index: 100;
+  display: block;
+}
+
+.erp-toolbar-dropdown.hidden {
+  display: none !important;
+}
+
+.erp-toolbar-dropdown button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 11px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #334155;
+}
+
+.erp-toolbar-dropdown button:hover {
+  background: #f8fafc;
+}
+
 .erp-user-dropdown {
   position: absolute;
   right: 0;

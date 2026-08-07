@@ -97,7 +97,7 @@
 
                 <div class="erp-field"><label>寄样日期</label><select id="filterSampleDate" class="erp-input"><option value="">全部</option></select></div>
 
-                <div class="erp-field"><label>跟进提醒</label><select id="filterRemind" class="erp-input"><option value="">全部</option><option value="next_7d">未来7天</option></select></div>
+                <div class="erp-field"><label>跟进提醒</label><select id="filterRemind" class="erp-input"><option value="">全部</option><option value="today">今天</option><option value="next_3d">未来3天</option><option value="next_7d">未来7天</option></select></div>
 
                 ${isManager() ? '<div class="erp-field"><label>负责人</label><select id="filterAssignee" class="erp-input"><option value="">全部</option></select></div>' : ''}
 
@@ -106,12 +106,15 @@
                 <button id="resetBtn" class="erp-btn erp-btn-secondary">重置</button>
 
                 <button id="batchTagsBtn" class="erp-btn erp-btn-secondary">批量设置标签</button>
-
-                <button id="scrapeEmailBtn" class="erp-btn erp-btn-secondary">抓取邮箱</button>
-
-                <button id="myMailSettingsBtn" class="erp-btn erp-btn-secondary">我的邮箱</button>
-
-                <button id="batchEmailBtn" class="erp-btn erp-btn-secondary">群发邮件</button>
+                <button id="batchClearRemindBtn" class="erp-btn erp-btn-secondary">取消提醒</button>
+                <div class="erp-toolbar-menu" id="emailActionsMenu">
+                  <button type="button" id="emailActionsBtn" class="erp-btn erp-btn-secondary">邮件 ▾</button>
+                  <div id="emailActionsDropdown" class="erp-toolbar-dropdown hidden">
+                    <button type="button" id="scrapeEmailBtn">抓取邮箱</button>
+                    <button type="button" id="myMailSettingsBtn">我的邮箱</button>
+                    <button type="button" id="batchEmailBtn">群发邮件</button>
+                  </div>
+                </div>
 
                 ${isManager() ? '<div class="erp-toolbar-spacer"></div><button id="batchAssignBtn" class="erp-btn erp-btn-secondary">分配负责人</button><button id="exportBtn" class="erp-btn erp-btn-success">导出 Excel</button>' : ''}
 
@@ -1629,6 +1632,32 @@
 
     }
 
+    async function submitBatchClearReminds() {
+      const count = getSelectedCount();
+      if (!count) return alert('请先勾选要取消提醒的达人');
+      if (!confirm(`确定取消已选 ${count} 位达人的跟进提醒吗？`)) return;
+      const btn = document.getElementById('batchClearRemindBtn');
+      if (btn) btn.disabled = true;
+      try {
+        const { res, data } = await api('/api/collaborated/batch-clear-reminds', {
+          method: 'POST',
+          body: JSON.stringify({
+            scope: allResultsSelected ? 'all' : 'page',
+            influencer_ids: allResultsSelected ? [] : [...selectedIds],
+            filters: getBatchFilters(),
+          }),
+        });
+        if (!res.ok) return alert(data.message || '批量取消提醒失败');
+        alert(`已取消 ${data.cleared || 0} 条提醒`);
+        resetSelection(false);
+        loadStats();
+      } catch (err) {
+        alert(err.message || '批量取消提醒失败');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
 
 
     async function submitScrapeEmails() {
@@ -1955,8 +1984,11 @@
 
       document.getElementById('batchTagsBtn')?.addEventListener('click', openBatchTagsModal);
 
+      document.getElementById('batchClearRemindBtn')?.addEventListener('click', submitBatchClearReminds);
+
       document.getElementById('scrapeEmailBtn')?.addEventListener('click', submitScrapeEmails);
 
+      bindToolbarDropdown();
       bindStaffMailSettingsModal();
       bindBatchEmailModal({
         bindKey: 'collab',

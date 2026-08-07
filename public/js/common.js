@@ -1074,6 +1074,24 @@ function bindStaffMailSettingsModal() {
   document.getElementById('testMailSettingsBtn')?.addEventListener('click', testStaffMailSettings);
 }
 
+function bindToolbarDropdown(menuId = 'emailActionsMenu', btnId = 'emailActionsBtn', dropdownId = 'emailActionsDropdown') {
+  const menu = document.getElementById(menuId);
+  const btn = document.getElementById(btnId);
+  const dropdown = document.getElementById(dropdownId);
+  if (!menu || !btn || !dropdown || menu.dataset.dropdownBound === '1') return;
+  menu.dataset.dropdownBound = '1';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dropdown.classList.toggle('hidden');
+  });
+  dropdown.addEventListener('click', () => {
+    dropdown.classList.add('hidden');
+  });
+  document.addEventListener('click', (e) => {
+    if (!menu.contains(e.target)) dropdown.classList.add('hidden');
+  });
+}
+
 async function loadStaffMailSettings() {
   const { res, data } = await api('/api/me/mail-settings');
   if (!res.ok) throw new Error(data.message || '获取邮箱配置失败');
@@ -3056,11 +3074,15 @@ function renderFollowUpPanel(influencerId, items, options = {}) {
           const remindHtml = remindAt
             ? `<span class="erp-follow-up-remind" title="${escapeAttr(`提醒：${remindAt}`)}">⏰ ${escapeHtml(remindAt)}</span>`
             : '';
+          const clearRemindBtn = remindAt
+            ? `<button type="button" class="erp-btn erp-btn-secondary erp-btn-sm follow-up-clear-remind-btn" data-id="${item.id}" data-influencer-id="${escapeAttr(influencerId)}">取消提醒</button>`
+            : '';
+          const actionBtns = `${clearRemindBtn}${canDelete ? `<button type="button" class="erp-btn erp-btn-danger erp-btn-sm follow-up-delete-btn" data-id="${item.id}" data-influencer-id="${escapeAttr(influencerId)}">删除</button>` : ''}`;
           return `
         <div class="erp-follow-up-item">
           <div class="erp-follow-up-item-head">
             <div class="erp-follow-up-meta">${escapeHtml(formatDateTime(item.created_at))} · ${escapeHtml(item.created_by || '未知')}${remindHtml}</div>
-            ${canDelete ? `<button type="button" class="erp-btn erp-btn-danger erp-btn-sm follow-up-delete-btn" data-id="${item.id}" data-influencer-id="${escapeAttr(influencerId)}">删除</button>` : ''}
+            ${actionBtns ? `<div class="erp-follow-up-item-actions">${actionBtns}</div>` : ''}
           </div>
           <div class="erp-follow-up-content">${escapeHtml(item.content || '')}</div>
         </div>
@@ -3174,6 +3196,31 @@ function bindInfluencerDetailModal() {
     input.closest('.erp-influencer-id-edit')?.querySelector('.save-influencer-id-btn')?.click();
   });
   document.getElementById('detailFollowUpContent')?.addEventListener('click', async (e) => {
+    const clearRemindBtn = e.target.closest('.follow-up-clear-remind-btn');
+    if (clearRemindBtn) {
+      const followUpId = clearRemindBtn.dataset.id;
+      const influencerId = clearRemindBtn.dataset.influencerId;
+      if (!followUpId || !influencerId) return;
+      if (!confirm('确定取消这条跟进记录的提醒吗？')) return;
+      clearRemindBtn.disabled = true;
+      try {
+        const { res, data } = await api(
+          `/api/influencer-profiles/${encodeURIComponent(influencerId)}/follow-ups/${followUpId}/clear-remind`,
+          { method: 'POST' }
+        );
+        if (!res.ok) throw new Error(data.message || '取消提醒失败');
+        await loadAndRenderFollowUps(influencerId);
+        if (typeof window.onInfluencerFollowUpChanged === 'function') {
+          window.onInfluencerFollowUpChanged(influencerId, data.data || []);
+        }
+      } catch (err) {
+        alert(err.message || '取消提醒失败');
+      } finally {
+        clearRemindBtn.disabled = false;
+      }
+      return;
+    }
+
     const deleteBtn = e.target.closest('.follow-up-delete-btn');
     if (deleteBtn) {
       if (!isManager()) return;

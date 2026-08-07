@@ -48,6 +48,8 @@ const {
   getInfluencerFollowUps,
   insertInfluencerFollowUp,
   deleteInfluencerFollowUp,
+  clearInfluencerFollowUpRemindById,
+  batchClearInfluencerFollowUpReminders,
   batchScrapeInfluencerEmails,
   batchSaveInfluencerEmails,
   filterInfluencerIdsNeedingEmailScrape,
@@ -568,8 +570,8 @@ function buildCollaboratedFilters(query, user) {
   filters.fulfilled_after_sample = toCellValue(query.fulfilled_after_sample) === '1';
   filters.include_allocation_tag = toTruthyFlag(query.include_allocation_tag);
   const remindFilter = toCellValue(query.remind_filter);
-  if (remindFilter === 'next_7d') {
-    filters.remind_filter = 'next_7d';
+  if (remindFilter === 'today' || remindFilter === 'next_3d' || remindFilter === 'next_7d') {
+    filters.remind_filter = remindFilter;
   }
   if (!isManager(user)) {
     filters.scope_assignee = user.name;
@@ -1462,6 +1464,57 @@ app.delete('/api/influencer-profiles/:influencerId/follow-ups/:followUpId', requ
   }
 });
 
+app.post('/api/influencer-profiles/:influencerId/follow-ups/:followUpId/clear-remind', requireAuth, async (req, res) => {
+  const influencerId = decodeURIComponent(toCellValue(req.params.influencerId));
+  const followUpId = Number(req.params.followUpId);
+  if (!influencerId || !followUpId) {
+    return res.status(400).json({ success: false, message: '参数无效' });
+  }
+  try {
+    if (!isManager(req.user) && !canStaffAccessInfluencerAssignee(influencerId, req.user.name)) {
+      return res.status(403).json({ success: false, message: '无权限操作此达人' });
+    }
+    const rows = await getInfluencerFollowUps(influencerId);
+    const target = rows.find((row) => Number(row.id) === followUpId);
+    if (!target) {
+      return res.status(404).json({ success: false, message: '跟进记录不存在' });
+    }
+    if (!String(target.remind_at || '').trim()) {
+      return res.status(400).json({ success: false, message: '该跟进记录没有提醒' });
+    }
+    await clearInfluencerFollowUpRemindById(followUpId);
+    const updated = await getInfluencerFollowUps(influencerId);
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || '取消提醒失败' });
+  }
+});
+
+app.post('/api/collaborated/batch-clear-reminds', requireAuth, async (req, res) => {
+  try {
+    const scope = req.body?.scope === 'all' ? 'all' : 'page';
+    let influencerIds = [];
+    if (scope === 'all') {
+      const filters = buildCollaboratedFilters(req.body?.filters || {}, req.user);
+      delete filters.page;
+      delete filters.pageSize;
+      influencerIds = await getCollaboratedInfluencerIdsByFilters(filters);
+    } else {
+      influencerIds = Array.isArray(req.body?.influencer_ids)
+        ? req.body.influencer_ids.map((id) => toCellValue(id)).filter(Boolean)
+        : [];
+    }
+    influencerIds = filterAccessibleInfluencerIds(influencerIds, req.user);
+    if (!influencerIds.length) {
+      return res.status(400).json({ success: false, message: '请先选择达人' });
+    }
+    const cleared = await batchClearInfluencerFollowUpReminders(influencerIds);
+    res.json({ success: true, cleared, total: influencerIds.length });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message || '批量取消提醒失败' });
+  }
+});
+
 app.post('/api/influencer-profiles/scrape-email-targets', requireAuth, async (req, res) => {
   try {
     const influencerIds = await resolveScrapeEmailInfluencerIds(req.body || {}, req.user);
@@ -2000,6 +2053,7 @@ app.get('/api/influencer-videos', requireAuth, async (req, res) => {
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
       publish_after_sample: toCellValue(req.query.publish_after_sample),
+      ordered_after_sample: toCellValue(req.query.ordered_after_sample),
       include_allocation_tag: toTruthyFlag(req.query.include_allocation_tag),
       sort_field: toCellValue(req.query.sort_field),
       sort_order: toCellValue(req.query.sort_order),
@@ -2032,6 +2086,7 @@ app.get('/api/influencer-videos/filter-options', requireAuth, async (req, res) =
       sample_date_from: toCellValue(req.query.sample_date_from),
       sample_date_to: toCellValue(req.query.sample_date_to),
       publish_after_sample: toCellValue(req.query.publish_after_sample),
+      ordered_after_sample: toCellValue(req.query.ordered_after_sample),
       include_allocation_tag: toTruthyFlag(req.query.include_allocation_tag),
     };
     const options = await getInfluencerVideoImportTimeOptions(filters);

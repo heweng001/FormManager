@@ -65,9 +65,14 @@
                 <button id="searchBtn" class="erp-btn erp-btn-primary">查询</button>
                 <button id="resetBtn" class="erp-btn erp-btn-secondary">重置</button>
                 <button id="batchTagsBtn" class="erp-btn erp-btn-secondary">批量设置标签</button>
-                <button id="scrapeEmailBtn" class="erp-btn erp-btn-secondary">抓取邮箱</button>
-                <button id="myMailSettingsBtn" class="erp-btn erp-btn-secondary">我的邮箱</button>
-                <button id="batchEmailBtn" class="erp-btn erp-btn-secondary">群发邮件</button>
+                <div class="erp-toolbar-menu" id="emailActionsMenu">
+                  <button type="button" id="emailActionsBtn" class="erp-btn erp-btn-secondary">邮件 ▾</button>
+                  <div id="emailActionsDropdown" class="erp-toolbar-dropdown hidden">
+                    <button type="button" id="scrapeEmailBtn">抓取邮箱</button>
+                    <button type="button" id="myMailSettingsBtn">我的邮箱</button>
+                    <button type="button" id="batchEmailBtn">群发邮件</button>
+                  </div>
+                </div>
                 <div class="erp-toolbar-spacer"></div>
                 <button id="toggleImportBtn" class="erp-btn erp-btn-secondary">Excel 导入</button>
                 ${isManager() ? '<button id="batchAssignBtn" class="erp-btn erp-btn-secondary">分配负责人</button><button id="batchDeleteBtn" class="erp-btn erp-btn-danger">批量删除</button><button id="exportBtn" class="erp-btn erp-btn-success">导出 Excel</button>' : ''}
@@ -749,6 +754,7 @@
       document.getElementById('batchDeleteBtn')?.addEventListener('click', submitBatchDelete);
       document.getElementById('batchTagsBtn')?.addEventListener('click', openBatchTagsModal);
       document.getElementById('scrapeEmailBtn')?.addEventListener('click', submitScrapeEmails);
+      bindToolbarDropdown();
       bindStaffMailSettingsModal();
       bindBatchEmailModal({
         bindKey: 'pending',
