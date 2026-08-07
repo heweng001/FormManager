@@ -547,6 +547,24 @@
 
 
 
+    function renderVideoCountCell(row) {
+
+      const key = String(row.influencer_id || '').trim();
+
+      const count = Number(row.video_count) || 0;
+
+      const text = String(count);
+
+      if (!key || count <= 0) return escapeHtml(text);
+
+      const href = `/influencer-videos.html?creator_username=${encodeURIComponent(key)}`;
+
+      return `<a href="${escapeAttr(href)}" class="erp-link-external video-count-link" title="查看出单相关达人视频">${escapeHtml(text)}</a>`;
+
+    }
+
+
+
     function renderOrderCountCell(row) {
 
       const key = String(row.influencer_id || '').trim();
@@ -786,7 +804,7 @@
 
         <td class="cell-published-video-count">${renderPublishedVideoCountCell(row)}</td>
 
-        <td class="cell-video-count">${escapeHtml(String(row.video_count ?? 0))}</td>
+        <td class="cell-video-count">${renderVideoCountCell(row)}</td>
 
         <td class="cell-order-count">${renderOrderCountCell(row)}</td>
 
@@ -1408,6 +1426,7 @@
         if (!cached) return;
         if (type === 'email') cached.email = value;
         if (type === 'phone') cached.phone = value;
+        if (type === 'whatsapp') cached.whatsapp = value;
       };
 
       window.onInfluencerIdRenamed = () => {

@@ -1136,6 +1136,7 @@
         if (String(record.influencer_id || '') !== String(influencerId)) return;
         if (type === 'email') record.email = value;
         if (type === 'phone') record.phone = value;
+        if (type === 'whatsapp') record.whatsapp = value;
       });
     };
 

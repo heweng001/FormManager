@@ -1337,16 +1337,35 @@ async function copyTextToClipboard(text) {
   return ok;
 }
 
+function getContactTypeLabel(type) {
+  if (type === 'phone') return '手机号';
+  if (type === 'whatsapp') return 'WhatsApp';
+  return '邮箱';
+}
+
+function isContactType(type) {
+  return type === 'email' || type === 'phone' || type === 'whatsapp';
+}
+
+function buildContactPatchBody(type, value) {
+  if (type === 'phone') return { phone: value };
+  if (type === 'whatsapp') return { whatsapp: value };
+  return { email: value };
+}
+
 function renderContactIconSvg(type) {
   if (type === 'phone') {
     return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1.1-.2 1.2.4 2.5.6 3.8.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.6.6 3.8.1.4 0 .8-.3 1.1L6.6 10.8z"/></svg>`;
+  }
+  if (type === 'whatsapp') {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.04 2C6.58 2 2.15 6.4 2.15 11.83c0 1.95.54 3.77 1.48 5.34L2 22l4.99-1.56a9.86 9.86 0 0 0 5.05 1.37h.01c5.46 0 9.89-4.4 9.89-9.83C21.94 6.4 17.5 2 12.04 2zm5.75 13.92c-.24.67-1.4 1.23-1.93 1.31-.5.07-1.13.1-1.82-.11-.42-.13-.96-.31-1.65-.61-2.9-1.26-4.78-4.18-4.93-4.37-.14-.19-1.2-1.6-1.2-3.05 0-1.45.76-2.16 1.03-2.45.27-.29.59-.36.79-.36h.57c.18 0 .42-.07.66.5.24.58.82 2 .89 2.14.07.14.12.31.02.5-.1.19-.14.31-.28.48-.14.17-.3.38-.43.51-.14.14-.29.29-.12.57.16.29.72 1.19 1.55 1.93 1.07.95 1.97 1.24 2.25 1.38.28.14.44.12.61-.07.16-.19.71-.83.9-1.11.19-.29.38-.24.64-.14.26.1 1.67.79 1.95.93.28.14.47.21.54.33.07.12.07.69-.17 1.36z"/></svg>`;
   }
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4-8 5L4 8V6l8 5 8-5v2z"/></svg>`;
 }
 
 function renderInfluencerContactIcon(influencerId, type, value) {
   const filled = hasInfluencerContactValue(value);
-  const label = type === 'phone' ? '手机号' : '邮箱';
+  const label = getContactTypeLabel(type);
   const title = filled ? `${label}：${String(value).trim()}（点击复制）` : `点击填写${label}`;
   const cls = `erp-contact-icon erp-contact-icon--${type}${filled ? ' is-filled' : ' is-empty'}`;
   return `<button type="button" class="${cls}" data-contact-type="${escapeAttr(type)}" data-influencer-id="${escapeAttr(String(influencerId || ''))}" data-contact-value="${escapeAttr(filled ? String(value).trim() : '')}" title="${escapeAttr(title)}" aria-label="${escapeAttr(title)}">${renderContactIconSvg(type)}</button>`;
@@ -1356,9 +1375,9 @@ function renderInfluencerContactIcons(influencerId, row = {}) {
   if (!influencerId) return '';
   const email = row?.email;
   const phone = row?.phone;
-  // Keep layout stable even when fields are empty strings from API.
-  if (email === undefined && phone === undefined) return '';
-  return `<span class="erp-contact-icons">${renderInfluencerContactIcon(influencerId, 'email', email)}${renderInfluencerContactIcon(influencerId, 'phone', phone)}${renderEmailSendStatusBadge(row)}</span>`;
+  const whatsapp = row?.whatsapp;
+  if (email === undefined && phone === undefined && whatsapp === undefined) return '';
+  return `<span class="erp-contact-icons">${renderInfluencerContactIcon(influencerId, 'email', email)}${renderInfluencerContactIcon(influencerId, 'phone', phone)}${renderInfluencerContactIcon(influencerId, 'whatsapp', whatsapp)}${renderEmailSendStatusBadge(row)}</span>`;
 }
 
 /** @deprecated use renderInfluencerContactIcons */
@@ -1374,8 +1393,8 @@ function openContactFillPopover(anchorBtn) {
   closeContactFillPopover();
   const influencerId = String(anchorBtn?.dataset?.influencerId || '').trim();
   const type = String(anchorBtn?.dataset?.contactType || '').trim();
-  if (!influencerId || !['email', 'phone'].includes(type)) return;
-  const label = type === 'phone' ? '手机号' : '邮箱';
+  if (!influencerId || !isContactType(type)) return;
+  const label = getContactTypeLabel(type);
   const pop = document.createElement('div');
   pop.id = 'erpContactFillPopover';
   pop.className = 'erp-contact-fill-popover';
@@ -1405,7 +1424,7 @@ function openContactFillPopover(anchorBtn) {
     }
     saveBtn.disabled = true;
     try {
-      const body = type === 'phone' ? { phone: value } : { email: value };
+      const body = buildContactPatchBody(type, value);
       const { res, data } = await api(`/api/influencer-profiles/${encodeURIComponent(influencerId)}`, {
         method: 'PATCH',
         body: JSON.stringify(body),
@@ -1440,10 +1459,10 @@ function openContactFillPopover(anchorBtn) {
 
 function updateContactIconInDom(influencerId, type, value) {
   const id = String(influencerId || '');
+  const label = getContactTypeLabel(type);
   document.querySelectorAll('.erp-contact-icon').forEach((btn) => {
     if (btn.dataset.influencerId !== id || btn.dataset.contactType !== type) return;
     const filled = hasInfluencerContactValue(value);
-    const label = type === 'phone' ? '手机号' : '邮箱';
     btn.classList.toggle('is-filled', filled);
     btn.classList.toggle('is-empty', !filled);
     btn.dataset.contactValue = filled ? String(value).trim() : '';
@@ -1472,7 +1491,7 @@ function bindInfluencerContactIcons(root = document) {
     e.stopPropagation();
     const value = String(btn.dataset.contactValue || '').trim();
     const type = String(btn.dataset.contactType || '').trim();
-    const label = type === 'phone' ? '手机号' : '邮箱';
+    const label = getContactTypeLabel(type);
     if (hasInfluencerContactValue(value)) {
       try {
         const ok = await copyTextToClipboard(value);
@@ -1487,7 +1506,7 @@ function bindInfluencerContactIcons(root = document) {
 }
 
 function renderInfluencerContactDetailField(influencerId, type, value) {
-  const label = type === 'phone' ? '手机号' : '邮箱';
+  const label = getContactTypeLabel(type);
   const text = hasInfluencerContactValue(value) ? String(value).trim() : '';
   return `<div class="erp-editable-wrap"><input type="text" class="erp-editable editable-contact" data-contact-type="${escapeAttr(type)}" data-influencer-id="${escapeAttr(String(influencerId || ''))}" value="${escapeAttr(text)}" placeholder="${escapeAttr(label)}" title="${escapeAttr(text)}" /><span class="erp-save-status save-status hidden"></span></div>`;
 }
@@ -1497,7 +1516,7 @@ const influencerContactSaveTimers = new Map();
 async function saveInfluencerContactField(input) {
   const influencerId = String(input?.dataset?.influencerId || '').trim();
   const type = String(input?.dataset?.contactType || '').trim();
-  if (!influencerId || !['email', 'phone'].includes(type)) return;
+  if (!influencerId || !isContactType(type)) return;
   const timerKey = `${type}-${influencerId}`;
   if (influencerContactSaveTimers.has(timerKey)) {
     clearTimeout(influencerContactSaveTimers.get(timerKey));
@@ -1506,7 +1525,7 @@ async function saveInfluencerContactField(input) {
   const value = input.value.trim();
   if (input.dataset.lastSaved === value) return;
   const status = input.parentElement?.querySelector('.save-status');
-  const body = type === 'phone' ? { phone: value } : { email: value };
+  const body = buildContactPatchBody(type, value);
   const { res, data } = await api(`/api/influencer-profiles/${encodeURIComponent(influencerId)}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
@@ -2856,6 +2875,7 @@ function renderInfluencerMergedDetailHtml(auditRecords, collabRow, renameLogs = 
     tags: (collabRow && collabRow.tags != null ? collabRow.tags : primary.tags) || '',
     email: (collabRow && collabRow.email != null ? collabRow.email : primary.email) || '',
     phone: (collabRow && collabRow.phone != null ? collabRow.phone : primary.phone) || '',
+    whatsapp: (collabRow && collabRow.whatsapp != null ? collabRow.whatsapp : primary.whatsapp) || '',
   };
   const overviewFields = [
     ['达人id', renderInfluencerIdEditSectionHtml(row.influencer_id, renameLogs)],
@@ -2863,6 +2883,7 @@ function renderInfluencerMergedDetailHtml(auditRecords, collabRow, renameLogs = 
     ['标签', renderTagsDisplayReadonly(row.tags)],
     ['邮箱', renderInfluencerContactDetailField(row.influencer_id, 'email', row.email)],
     ['手机号', renderInfluencerContactDetailField(row.influencer_id, 'phone', row.phone)],
+    ['WhatsApp', renderInfluencerContactDetailField(row.influencer_id, 'whatsapp', row.whatsapp)],
     ['履约进展', escapeHtml(row.fulfillment_progress || '-')],
     ['达人备注', escapeHtml(row.influencer_remark || '-')],
     ['发视频数', escapeHtml(String(row.published_video_count ?? 0))],

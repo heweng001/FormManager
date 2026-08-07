@@ -33,6 +33,20 @@
         help: '统计口径：所选寄样时间段内，该负责人对应达人的样品订单条数（每条样品订单计 1）。',
       },
       {
+        key: 'published_influencer_count',
+        label: '履约达人数',
+        group: 'sample',
+        linkType: 'influencer-videos',
+        help: '统计口径：所选寄样时间段内已寄样的达人中，存在发布日期有效且晚于对应寄样日期的视频的达人数（按达人去重）。',
+      },
+      {
+        key: 'video_recovery_rate',
+        label: '履约率',
+        group: 'rate',
+        linkType: null,
+        help: '计算公式：履约达人数 ÷ 寄样数 × 100%。发布日期无效或未晚于寄样日期的不计入。',
+      },
+      {
         key: 'published_video_count',
         label: '发视频数',
         group: 'sample',
@@ -40,11 +54,25 @@
         help: '统计口径：所选寄样时间段内已寄样的达人，发布日期有效且晚于对应寄样日期的去重内容 ID 数量。',
       },
       {
+        key: 'video_output_rate',
+        label: '视频产出率',
+        group: 'rate',
+        linkType: null,
+        help: '计算公式：发视频数 ÷ 寄样数 × 100%。',
+      },
+      {
         key: 'ordered_influencer_count',
         label: '出单达人数',
         group: 'alliance',
         linkType: 'collaborated',
         help: '统计口径：在所选寄样时间段内已寄样的达人中，存在支付时间晚于寄样时间的联盟订单的达人数（按达人去重；合计行按达人唯一计数，不因多负责人重复累加）。',
+      },
+      {
+        key: 'order_rate',
+        label: '达人出单率',
+        group: 'rate',
+        linkType: null,
+        help: '计算公式：出单达人数 ÷ 寄样数 × 100%。',
       },
       {
         key: 'video_count',
@@ -59,20 +87,6 @@
         group: 'alliance',
         linkType: 'alliance',
         help: '统计口径：满足出单条件的联盟订单条数（支付时间须晚于对应寄样时间）。',
-      },
-      {
-        key: 'video_recovery_rate',
-        label: '视频回收率',
-        group: 'rate',
-        linkType: null,
-        help: '计算公式：寄样后发过视频的达人数 ÷ 寄样数 × 100%。发布日期无效或未晚于寄样日期的不计入。',
-      },
-      {
-        key: 'order_rate',
-        label: '达人出单率',
-        group: 'rate',
-        linkType: null,
-        help: '计算公式：出单达人数 ÷ 寄样数 × 100%。',
       },
       {
         key: 'avg_order_count',
@@ -242,7 +256,12 @@
 
     function renderMetricCell(row, metric, assignee) {
       const value = row[metric.key];
-      if (metric.key === 'approval_rate' || metric.key === 'order_rate' || metric.key === 'video_recovery_rate') {
+      if (
+        metric.key === 'approval_rate' ||
+        metric.key === 'order_rate' ||
+        metric.key === 'video_recovery_rate' ||
+        metric.key === 'video_output_rate'
+      ) {
         return escapeHtml(formatRatePercent(value));
       }
       if (metric.key === 'avg_order_count') {

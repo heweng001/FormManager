@@ -40,6 +40,7 @@ function getListEnrichMaps() {
     collaboratedKeys: getRealCollaboratedInfluencerKeySet(),
     emailMap: getInfluencerEmailMap(),
     phoneMap: getInfluencerPhoneMap(),
+    whatsappMap: getInfluencerWhatsappMap(),
     emailSendMap: getLatestEmailSendSummaryMap(),
     skuModelMap: getSkuModelLookupMap(),
   };
@@ -229,6 +230,16 @@ function migrateInfluencerProfilesPhone() {
   const columns = info[0].values.map((row) => row[1]);
   if (!columns.includes('phone')) {
     db.run('ALTER TABLE influencer_profiles ADD COLUMN phone TEXT');
+    saveDb();
+  }
+}
+
+function migrateInfluencerProfilesWhatsapp() {
+  const info = db.exec('PRAGMA table_info(influencer_profiles)');
+  if (!info.length) return;
+  const columns = info[0].values.map((row) => row[1]);
+  if (!columns.includes('whatsapp')) {
+    db.run('ALTER TABLE influencer_profiles ADD COLUMN whatsapp TEXT');
     saveDb();
   }
 }
@@ -652,6 +663,7 @@ function enrichRecordsWithMergedFields(rows, options = {}) {
     : maps?.collaboratedKeys || getRealCollaboratedInfluencerKeySet();
   const emailMap = maps?.emailMap || getInfluencerEmailMap();
   const phoneMap = maps?.phoneMap || getInfluencerPhoneMap();
+  const whatsappMap = maps?.whatsappMap || getInfluencerWhatsappMap();
   const emailSendMap = maps?.emailSendMap || getLatestEmailSendSummaryMap();
   const skuModelMap = maps?.skuModelMap || getSkuModelLookupMap();
   return list.map((row) =>
@@ -665,7 +677,8 @@ function enrichRecordsWithMergedFields(rows, options = {}) {
       emailMap,
       emailSendMap,
       skuModelMap,
-      phoneMap
+      phoneMap,
+      whatsappMap
     )
   );
 }
@@ -684,7 +697,8 @@ function enrichRecordWithMergedFields(
   emailMap,
   emailSendMap,
   skuModelMap,
-  phoneMap
+  phoneMap,
+  whatsappMap
 ) {
   if (!row) return row;
   const tagsMap = tagMap || getInfluencerMergedTagsMap();
@@ -715,6 +729,7 @@ function enrichRecordWithMergedFields(
   row.is_collaborated = !!canonicalKey && collabKeys.has(canonicalKey);
   row.email = (emailMap || getInfluencerEmailMap()).get(canonicalKey) || '';
   row.phone = (phoneMap || getInfluencerPhoneMap()).get(canonicalKey) || '';
+  row.whatsapp = (whatsappMap || getInfluencerWhatsappMap()).get(canonicalKey) || '';
   applyEmailSendSummaryToRow(
     row,
     (emailSendMap || getLatestEmailSendSummaryMap()).get(canonicalKey)
@@ -981,6 +996,7 @@ async function initDatabase() {
   migrateInfluencerProfileInfluencerRemark();
   migrateInfluencerProfilesEmail();
   migrateInfluencerProfilesPhone();
+  migrateInfluencerProfilesWhatsapp();
   migrateFulfillmentProgressShortLabels();
   migrateRemoveDuplicateSampleTag();
   migrateRecordsAssignee();
@@ -2039,6 +2055,25 @@ function updateInfluencerProfilePhone(influencerId, phone, updatedBy = '') {
   const value = String(phone ?? '').trim();
   if (!id) return Promise.reject(new Error('达人 id 不能为空'));
   return upsertInfluencerProfile(id, { phone: value }, updatedBy).then(() => value);
+}
+
+function getInfluencerWhatsappMap() {
+  const rows = queryRows(
+    `SELECT influencer_id, whatsapp FROM influencer_profiles WHERE TRIM(COALESCE(whatsapp, '')) != ''`
+  );
+  const map = new Map();
+  rows.forEach((row) => {
+    const value = String(row.whatsapp || '').trim();
+    getInfluencerAliasKeys(row.influencer_id).forEach((key) => map.set(key, value));
+  });
+  return map;
+}
+
+function updateInfluencerProfileWhatsapp(influencerId, whatsapp, updatedBy = '') {
+  const id = resolveCanonicalInfluencerId(influencerId) || String(influencerId || '').trim();
+  const value = String(whatsapp ?? '').trim();
+  if (!id) return Promise.reject(new Error('达人 id 不能为空'));
+  return upsertInfluencerProfile(id, { whatsapp: value }, updatedBy).then(() => value);
 }
 
 const {
@@ -4042,12 +4077,13 @@ function createEmptySampleShipmentStatsRow() {
     audit_tentative: 0,
     approval_rate: null,
     sample_count: 0,
-    published_video_count: 0,
     published_influencer_count: 0,
+    published_video_count: 0,
     ordered_influencer_count: 0,
     video_count: 0,
     order_count: 0,
     video_recovery_rate: null,
+    video_output_rate: null,
     order_rate: null,
     avg_order_count: null,
   };
@@ -4060,6 +4096,13 @@ function calcVideoRecoveryRatePercent(publishedInfluencerCount, sampleCount) {
   return (publishedInfluencers / samples) * 100;
 }
 
+function calcVideoOutputRatePercent(publishedVideoCount, sampleCount) {
+  const videos = Number(publishedVideoCount) || 0;
+  const samples = Number(sampleCount) || 0;
+  if (samples <= 0) return null;
+  return (videos / samples) * 100;
+}
+
 function finalizeSampleShipmentStatsRow(row) {
   row.approval_rate = calcApprovalRatePercent(
     row.audit_approved,
@@ -4067,6 +4110,7 @@ function finalizeSampleShipmentStatsRow(row) {
     row.audit_tentative
   );
   row.video_recovery_rate = calcVideoRecoveryRatePercent(row.published_influencer_count, row.sample_count);
+  row.video_output_rate = calcVideoOutputRatePercent(row.published_video_count, row.sample_count);
   row.order_rate = calcOrderRatePercent(row.ordered_influencer_count, row.sample_count);
   row.avg_order_count = calcAvgOrderCount(row.order_count, row.sample_count);
   return row;
@@ -5006,7 +5050,7 @@ function recordMatchesTagFilter(tagsValue, tagFilter) {
 
 function getInfluencerProfileMap() {
   const rows = queryRows(
-    'SELECT influencer_id, tags, assignee, influencer_remark, pinned, pinned_at, fulfillment_progress, email, phone FROM influencer_profiles'
+    'SELECT influencer_id, tags, assignee, influencer_remark, pinned, pinned_at, fulfillment_progress, email, phone, whatsapp FROM influencer_profiles'
   );
   const map = new Map();
   rows.forEach((row) => {
@@ -5055,6 +5099,10 @@ function upsertInfluencerProfile(influencerId, fields, updatedBy = '') {
       updates.push('phone = ?');
       params.push(fields.phone || '');
     }
+    if (fields.whatsapp !== undefined) {
+      updates.push('whatsapp = ?');
+      params.push(fields.whatsapp || '');
+    }
     if (!updates.length) return Promise.resolve(id);
     updates.push('updated_by = ?');
     updates.push('update_time = CURRENT_TIMESTAMP');
@@ -5070,8 +5118,8 @@ function upsertInfluencerProfile(influencerId, fields, updatedBy = '') {
       if (rec?.assignee) assignee = rec.assignee;
     }
     db.run(
-      `INSERT INTO influencer_profiles (influencer_id, tags, assignee, remark, influencer_remark, fulfillment_progress, email, phone, updated_by)
-       VALUES (?, ?, ?, '', ?, ?, ?, ?, ?)`,
+      `INSERT INTO influencer_profiles (influencer_id, tags, assignee, remark, influencer_remark, fulfillment_progress, email, phone, whatsapp, updated_by)
+       VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
       [
         id,
         tags,
@@ -5080,6 +5128,7 @@ function upsertInfluencerProfile(influencerId, fields, updatedBy = '') {
         fields.fulfillment_progress !== undefined ? fields.fulfillment_progress || '' : '',
         fields.email !== undefined ? fields.email || '' : '',
         fields.phone !== undefined ? fields.phone || '' : '',
+        fields.whatsapp !== undefined ? fields.whatsapp || '' : '',
         updatedBy || '',
       ]
     );
@@ -5472,6 +5521,7 @@ function buildCollaboratedRows(filters = {}) {
       influencer_remark: profile?.influencer_remark || '',
       email: profile?.email || '',
       phone: profile?.phone || '',
+      whatsapp: profile?.whatsapp || '',
       latest_email_send_at: sendSummary?.sent_at || '',
       latest_email_send_status: sendSummary?.status || '',
       latest_email_send_error: sendSummary?.error_message || '',
@@ -5669,7 +5719,7 @@ function getCollaboratedRowForInfluencer(influencerId) {
   const displayValues = getInfluencerAliasDisplayValues(id);
   const profile = queryOne(
     `
-    SELECT influencer_id, tags, assignee, influencer_remark, fulfillment_progress, email, phone, pinned, pinned_at
+    SELECT influencer_id, tags, assignee, influencer_remark, fulfillment_progress, email, phone, whatsapp, pinned, pinned_at
     FROM influencer_profiles
     WHERE influencer_id = ?
     `,
@@ -5694,6 +5744,7 @@ function getCollaboratedRowForInfluencer(influencerId) {
     influencer_remark: profile?.influencer_remark || '',
     email: profile?.email || '',
     phone: profile?.phone || '',
+    whatsapp: profile?.whatsapp || '',
     fulfillment_progress: profile?.fulfillment_progress || '',
     pinned: profile && Number(profile.pinned) === 1 ? 1 : 0,
     pinned_at: profile?.pinned_at || '',
@@ -5712,7 +5763,7 @@ function enrichRecordsForInfluencerDetail(rows, influencerId) {
   const id = resolveCanonicalInfluencerId(influencerId) || String(influencerId || '').trim();
   const profile = queryOne(
     `
-    SELECT influencer_id, tags, assignee, email, phone
+    SELECT influencer_id, tags, assignee, email, phone, whatsapp
     FROM influencer_profiles
     WHERE influencer_id = ?
     `,
@@ -5722,6 +5773,7 @@ function enrichRecordsForInfluencerDetail(rows, influencerId) {
   const tags = profile?.tags ? normalizeTagsValue(profile.tags) : '';
   const email = profile?.email || '';
   const phone = profile?.phone || '';
+  const whatsapp = profile?.whatsapp || '';
   const sampleOrderMaps = buildSampleOrderIndexMapsForInfluencer(id);
   const skuModelMap = getSkuModelLookupMap();
   const aliasKeys = getInfluencerAliasKeys(id);
@@ -5748,6 +5800,7 @@ function enrichRecordsForInfluencerDetail(rows, influencerId) {
     row.assignee = assigneeInfo.assignee || row.assignee || '';
     row.email = email;
     row.phone = phone;
+    row.whatsapp = whatsapp;
     row.influencer_mixed_audit = false;
     row.influencer_application_count = list.length;
     row.influencer_applications = [];
@@ -6854,8 +6907,10 @@ module.exports = {
   getInfluencerFollowUpCountMap,
   getInfluencerEmailMap,
   getInfluencerPhoneMap,
+  getInfluencerWhatsappMap,
   updateInfluencerProfileEmail,
   updateInfluencerProfilePhone,
+  updateInfluencerProfileWhatsapp,
   batchScrapeInfluencerEmails,
   batchSaveInfluencerEmails,
   filterInfluencerIdsNeedingEmailScrape,

@@ -520,7 +520,7 @@ input.erp-input.erp-date-input {
 
 .erp-influencer-id--no-audit,
 .erp-influencer-id--no-audit .erp-link-external {
-  color: #64748b;
+  color: #2563eb;
   font-weight: 500;
 }
 
@@ -570,6 +570,17 @@ input.erp-input.erp-date-input {
 .erp-contact-icon.is-filled:hover {
   color: #0d9488;
   background: #ccfbf1;
+}
+
+.erp-contact-icon.is-filled.erp-contact-icon--whatsapp {
+  color: #15803d;
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.erp-contact-icon.is-filled.erp-contact-icon--whatsapp:hover {
+  color: #166534;
+  background: #dcfce7;
 }
 
 .erp-contact-fill-popover {

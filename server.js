@@ -112,6 +112,7 @@ const {
   batchUpdateInfluencerAssignees,
   updateInfluencerProfileEmail,
   updateInfluencerProfilePhone,
+  updateInfluencerProfileWhatsapp,
   FULFILLMENT_PROGRESS_OPTIONS,
   formatBeijingDateTime,
   getStaffMailSettingsPublic,
@@ -1350,6 +1351,9 @@ app.patch('/api/influencer-profiles/:influencerId', requireAuth, async (req, res
     }
     if (req.body?.phone !== undefined) {
       await updateInfluencerProfilePhone(influencerId, toCellValue(req.body.phone), req.user.name);
+    }
+    if (req.body?.whatsapp !== undefined) {
+      await updateInfluencerProfileWhatsapp(influencerId, toCellValue(req.body.whatsapp), req.user.name);
     }
     if (req.body?.toggle_pin) {
       const result = await toggleInfluencerProfilePin(influencerId, req.user.name);
