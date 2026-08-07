@@ -2270,65 +2270,11 @@ function migrateReconcileAlliancePaymentYmd() {
   setAppMeta('alliance_payment_ymd_reconcile_v1', '1');
 }
 
-/** Fix payment dates that were stored as DD/MM (future) but originated as US MM/DD. */
+/** Obsolete: imports now use DD/MM; do not swap stored payment dates. */
 function migrateRepairFutureSwappedAlliancePaymentDates() {
   ensureAppMetaTable();
   if (getAppMeta('alliance_payment_mdy_prefer_repair_v1') === '1') return;
-
-  const futureLimit = shiftBeijingYmd(7);
-  let changed = 0;
-  queryRows(
-    `
-    SELECT id, payment_time_raw, payment_time_ymd, data_json
-    FROM alliance_orders
-    WHERE TRIM(COALESCE(payment_time_ymd, '')) > ?
-    `,
-    [futureLimit]
-  ).forEach((row) => {
-    const ymd = String(row.payment_time_ymd || '').trim();
-    if (!/^\d{8}$/.test(ymd)) return;
-    const month = Number(ymd.slice(4, 6));
-    const day = Number(ymd.slice(6, 8));
-    // Swapped MM/DD→DD/MM always yields day<=12; day>12 means original MDY was unambiguous.
-    if (day > 12) return;
-    const swapped = buildYmdFromMonthDayYear(day, month, ymd.slice(0, 4));
-    if (!swapped || swapped === ymd || swapped > futureLimit) return;
-
-    const time = extractTimePartsFromText(row.payment_time_raw || '');
-    const newRaw = formatDisplayDateTimeParts({
-      year: swapped.slice(0, 4),
-      month: swapped.slice(4, 6),
-      day: swapped.slice(6, 8),
-      hour: time?.hour || 0,
-      minute: time?.minute || 0,
-      second: time?.second || 0,
-      hasTime: Boolean(time),
-      hasSeconds: Boolean(time?.hasSeconds),
-    });
-
-    let data = {};
-    try {
-      data = JSON.parse(row.data_json || '{}');
-    } catch {
-      data = {};
-    }
-    if (data && typeof data === 'object') {
-      data.payment_time_raw = newRaw;
-    }
-
-    db.run(
-      `
-      UPDATE alliance_orders
-      SET payment_time_raw = ?, payment_time_ymd = ?, data_json = ?
-      WHERE id = ?
-      `,
-      [newRaw, swapped, JSON.stringify(data), row.id]
-    );
-    changed += 1;
-  });
-
   setAppMeta('alliance_payment_mdy_prefer_repair_v1', '1');
-  if (changed) saveDb();
 }
 
 function migrateClearAllianceOrdersColumnTrimV1() {
@@ -2819,27 +2765,37 @@ function buildYmdFromMonthDayYear(month, day, year) {
 }
 
 /**
- * Parse M/D/Y or D/M/Y style parts.
- * TikTok US / Excel US exports use MM/DD/YYYY — always prefer that when ambiguous.
+ * Parse D/M/Y style parts (day first, month second).
+ * Never swap when month > 12 — caller should treat empty as invalid import date.
  */
 function parseSlashDateToYmd(parts) {
-  const a = Number(parts[0]);
-  const b = Number(parts[1]);
+  const day = Number(parts[0]);
+  const month = Number(parts[1]);
   const year = parts[2];
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return '';
+  if (!Number.isFinite(day) || !Number.isFinite(month)) return '';
+  return buildYmdFromMonthDayYear(month, day, year);
+}
 
-  if (a > 12 && b <= 12) {
-    // Unambiguous day/month
-    return buildYmdFromMonthDayYear(b, a, year);
-  }
-  if (b > 12 && a <= 12) {
-    // Unambiguous month/day
-    return buildYmdFromMonthDayYear(a, b, year);
-  }
-  if (a > 12 || b > 12) return '';
+const IMPORT_DATE_FORMAT_ERROR = '导入Excel中的日期有误，请确认日期格式后再导入。';
 
-  // Ambiguous (both <= 12): prefer US MM/DD.
-  return buildYmdFromMonthDayYear(a, b, year);
+function createImportDateFormatError() {
+  const err = new Error(IMPORT_DATE_FORMAT_ERROR);
+  err.code = 'IMPORT_DATE_FORMAT';
+  return err;
+}
+
+function isDayMonthYearSlashText(value) {
+  const text = String(value || '').trim();
+  return /^\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/.test(text) && !/^\d{4}[./-]/.test(text);
+}
+
+/** Reject D/M/Y values that are not a valid calendar date (e.g. 08/15/2026 → month 15). */
+function assertImportedDateValue(value) {
+  const text = String(value || '').trim();
+  if (!text) return;
+  if (!isDayMonthYearSlashText(text)) return;
+  const parts = text.split(/[ T]/)[0].split(/[-/.]/);
+  if (!parseSlashDateToYmd(parts)) throw createImportDateFormatError();
 }
 
 function parseCreatedTimeToYmd(value) {
@@ -2854,12 +2810,10 @@ function parseCreatedTimeToYmd(value) {
     const ymd = `${y}${m}${d}`;
     return isValidYmd(ymd) ? ymd : '';
   }
-  // Prefer explicit MM/DD parser over locale-dependent Date() for slash dates
-  // (including values that also contain AM/PM).
+  // Explicit DD/MM parser — do not fall through to locale-dependent Date() on failure.
   if (/^\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/.test(text)) {
     const parts = text.split(/[ T]/)[0].split(/[-/.]/);
-    const ymd = parseSlashDateToYmd(parts);
-    if (ymd) return ymd;
+    return parseSlashDateToYmd(parts) || '';
   }
   if (/\b(AM|PM)\b/i.test(text)) {
     const date = new Date(text);
@@ -2893,6 +2847,20 @@ function resolveAlliancePaymentYmd(order) {
   return String(order?.payment_time_ymd || '').trim();
 }
 
+function sanitizeSampleOrderData(data = {}) {
+  const cleaned = {};
+  SAMPLE_ORDER_COLUMNS.forEach((column) => {
+    cleaned[column.key] = readOrderFieldFromData(data, column.key, column.legacyAliases || []);
+  });
+  if (cleaned.created_time_raw) {
+    cleaned.created_time_raw = normalizeImportedDateTimeRaw(cleaned.created_time_raw);
+  }
+  if (cleaned.received_time_raw) {
+    cleaned.received_time_raw = normalizeImportedDateTimeRaw(cleaned.received_time_raw);
+  }
+  return cleaned;
+}
+
 function extractSampleOrderFields(data) {
   const buyer_username = readOrderFieldFromData(data, 'buyer_username', [
     '达人id', '达人ID', 'Buyer Username', 'buyer username', 'BuyerUsername', 'Creator Username',
@@ -2901,11 +2869,12 @@ function extractSampleOrderFields(data) {
   const order_id = readOrderFieldFromData(data, 'order_id', [
     '订单id', '订单ID', 'Order ID', 'order id', 'OrderID', 'Main order ID', 'Platform order ID',
   ]);
-  const created_time_raw =
+  const created_time_raw = normalizeImportedDateTimeRaw(
     readOrderFieldFromData(data, 'created_time_raw', [
       '寄样时间', '寄样日期', 'Created Time', 'created time', 'CreatedTime',
     ]) ||
-    readOrderFieldFromData(data, 'payment_time_raw', ['支付时间', 'Payment Time', 'payment_time']);
+      readOrderFieldFromData(data, 'payment_time_raw', ['支付时间', 'Payment Time', 'payment_time'])
+  );
   const created_time_ymd = parseCreatedTimeToYmd(created_time_raw);
   return { buyer_username, sku_id, order_id, created_time_raw, created_time_ymd };
 }
@@ -2952,7 +2921,8 @@ function findSampleOrderByUniqueKey(uniqueKey) {
 }
 
 function insertSampleOrder({ unique_key, data, imported_by, import_time }, options = {}) {
-  const fields = extractSampleOrderFields(data);
+  const cleanedData = sanitizeSampleOrderData(data);
+  const fields = extractSampleOrderFields(cleanedData);
   const resolvedImportTime = import_time || formatBeijingDateTime();
   db.run(
     `INSERT INTO sample_orders (
@@ -2960,7 +2930,7 @@ function insertSampleOrder({ unique_key, data, imported_by, import_time }, optio
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       unique_key,
-      JSON.stringify(data || {}),
+      JSON.stringify(cleanedData || {}),
       fields.buyer_username,
       fields.sku_id,
       fields.order_id,
@@ -3304,6 +3274,18 @@ function syncSampleDatesToRecords(options = {}) {
 }
 
 function importSampleOrdersBatch({ rows, imported_by, import_time }) {
+  for (const row of rows) {
+    const data = row.data || {};
+    assertImportedDateValue(
+      readOrderFieldFromData(data, 'created_time_raw', [
+        '寄样时间', '寄样日期', 'Created Time', 'created time', 'CreatedTime',
+      ]) || readOrderFieldFromData(data, 'payment_time_raw', ['支付时间', 'Payment Time', 'payment_time'])
+    );
+    assertImportedDateValue(
+      readOrderFieldFromData(data, 'received_time_raw', ['签收时间', '送达时间', 'Received Time', 'received_time'])
+    );
+  }
+
   let inserted = 0;
   let skipped = 0;
   const duplicateKeys = [];
@@ -3602,6 +3584,12 @@ function updateAllianceOrder(id, { unique_key, data, imported_by, import_time },
 }
 
 function importAllianceOrdersBatch({ rows, imported_by, import_time }) {
+  for (const row of rows) {
+    assertImportedDateValue(
+      readOrderFieldFromData(row.data || {}, 'payment_time_raw', ['支付时间', 'Payment Time'])
+    );
+  }
+
   let inserted = 0;
   let updated = 0;
   const batchImportTime = import_time || formatBeijingDateTime();
@@ -4439,10 +4427,23 @@ function batchDeleteAllianceOrders(ids) {
   return Promise.resolve(uniqueIds.length);
 }
 
+function sanitizeInfluencerVideoData(data = {}) {
+  const cleaned = {};
+  INFLUENCER_VIDEO_COLUMNS.forEach((column) => {
+    cleaned[column.key] = readOrderFieldFromData(data, column.key, column.legacyAliases || []);
+  });
+  if (cleaned.publish_date_raw) {
+    cleaned.publish_date_raw = normalizeImportedDateTimeRaw(cleaned.publish_date_raw);
+  }
+  return cleaned;
+}
+
 function extractInfluencerVideoFields(data) {
   const video_title = readOrderFieldFromData(data, 'video_title', ['视频标题', 'Video Title']);
   const content_id = readOrderFieldFromData(data, 'content_id', ['内容id', '内容 ID', 'Content ID']);
-  const publish_date_raw = readOrderFieldFromData(data, 'publish_date_raw', ['发布日期', 'Publish Date']);
+  const publish_date_raw = normalizeImportedDateTimeRaw(
+    readOrderFieldFromData(data, 'publish_date_raw', ['发布日期', 'Publish Date'])
+  );
   const video_url = readOrderFieldFromData(data, 'video_url', ['视频链接', 'Video URL', '链接']);
   const creator_username = readOrderFieldFromData(data, 'creator_username', ['达人id', '达人 ID', 'Creator Username']);
   const product_id = readOrderFieldFromData(data, 'product_id', ['商品id', '商品 ID', 'Product ID']);
@@ -4463,7 +4464,8 @@ function findInfluencerVideoByUniqueKey(uniqueKey) {
 }
 
 function insertInfluencerVideo({ unique_key, data, imported_by, import_time }, options = {}) {
-  const fields = extractInfluencerVideoFields(data);
+  const cleanedData = sanitizeInfluencerVideoData(data);
+  const fields = extractInfluencerVideoFields(cleanedData);
   const resolvedUniqueKey = unique_key || fields.content_id;
   const resolvedImportTime = import_time || formatBeijingDateTime();
   db.run(
@@ -4473,7 +4475,7 @@ function insertInfluencerVideo({ unique_key, data, imported_by, import_time }, o
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       resolvedUniqueKey,
-      JSON.stringify(data || {}),
+      JSON.stringify(cleanedData || {}),
       fields.video_title,
       fields.content_id,
       fields.publish_date_raw,
@@ -4490,6 +4492,12 @@ function insertInfluencerVideo({ unique_key, data, imported_by, import_time }, o
 }
 
 function importInfluencerVideosBatch({ rows, imported_by, import_time }) {
+  for (const row of rows) {
+    assertImportedDateValue(
+      readOrderFieldFromData(row.data || {}, 'publish_date_raw', ['发布日期', 'Publish Date'])
+    );
+  }
+
   let inserted = 0;
   let skipped = 0;
   const duplicateKeys = [];

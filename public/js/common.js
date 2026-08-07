@@ -406,31 +406,10 @@ function formatDateFromJsDate(date, { includeSeconds = true } = {}) {
   });
 }
 
-function resolveSlashDateParts(a, b, preferMonthFirst = false) {
-  const first = Number(a);
-  const second = Number(b);
-  if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
-  let month;
-  let day;
-  if (first > 12) {
-    day = first;
-    month = second;
-  } else if (second > 12) {
-    month = first;
-    day = second;
-  } else if (preferMonthFirst) {
-    month = first;
-    day = second;
-  } else if (first > second) {
-    month = first;
-    day = second;
-  } else if (first < second) {
-    day = first;
-    month = second;
-  } else {
-    month = first;
-    day = second;
-  }
+function resolveSlashDateParts(a, b) {
+  const day = Number(a);
+  const month = Number(b);
+  if (!Number.isFinite(day) || !Number.isFinite(month)) return null;
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   return { month, day };
 }
@@ -512,10 +491,25 @@ function parseDateTimeParts(value, storage = 'utc') {
     };
   }
 
+  // Already-normalized yyyy/MM/dd (or yyyy.MM.dd)
+  const ymdSlashMatch = text.match(/^(\d{4})[./](\d{1,2})[./](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (ymdSlashMatch) {
+    const time = extractTimeParts(text);
+    return {
+      year: ymdSlashMatch[1],
+      month: ymdSlashMatch[2],
+      day: ymdSlashMatch[3],
+      hour: time?.hour ?? Number(ymdSlashMatch[4] || 0),
+      minute: time?.minute ?? Number(ymdSlashMatch[5] || 0),
+      second: time?.second ?? Number(ymdSlashMatch[6] || 0),
+      hasTime: Boolean(time) || ymdSlashMatch[4] != null,
+      hasSeconds: Boolean(time?.hasSeconds) || ymdSlashMatch[6] != null,
+    };
+  }
+
   const slashMatch = text.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})/);
   if (slashMatch) {
-    const preferMonthFirst = /\b(AM|PM)\b/i.test(text);
-    const resolved = resolveSlashDateParts(slashMatch[1], slashMatch[2], preferMonthFirst);
+    const resolved = resolveSlashDateParts(slashMatch[1], slashMatch[2]);
     if (!resolved) return null;
     const time = extractTimeParts(text);
     return {

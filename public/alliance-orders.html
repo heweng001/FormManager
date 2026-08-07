@@ -63,7 +63,8 @@
                     fileColumnCount: ALLIANCE_ORDER_FILE_COLUMN_COUNT,
                     tips: [
                       '第 1 列（订单 id）为唯一标识；相同订单 id 重复导入时将覆盖已有记录。',
-                      '支付时间（第 27 列）导入时会解析为 yyyy/mm/dd HH:mm(:ss) 格式存储与展示。',
+                      '支付时间（第 27 列）按日/月/年（DD/MM）解析，入库与展示统一为 yyyy/MM/dd HH:mm(:ss)。',
+                      '若日期中月份大于 12（如 08/15/2026），将整批导入失败并提示确认日期格式。',
                     ],
                   })}
                   <input type="file" id="fileInput" accept="${IMPORT_FILE_ACCEPT}" style="display:none" />

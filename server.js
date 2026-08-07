@@ -1806,6 +1806,9 @@ app.post('/api/alliance-orders/upload', requireAuth, upload.single('file'), asyn
     });
   } catch (err) {
     console.error('联盟订单导入失败:', err);
+    if (err.code === 'IMPORT_DATE_FORMAT') {
+      return res.status(400).json({ success: false, message: err.message });
+    }
     res.status(500).json({ success: false, message: '联盟订单导入失败' });
   } finally {
     fs.unlink(filePath, () => {});
@@ -1958,6 +1961,9 @@ app.post('/api/influencer-videos/upload', requireAuth, xlsxUpload.single('file')
     });
   } catch (err) {
     console.error('达人视频导入失败:', err);
+    if (err.code === 'IMPORT_DATE_FORMAT') {
+      return res.status(400).json({ success: false, message: err.message });
+    }
     res.status(500).json({ success: false, message: err.message || '达人视频导入失败' });
   } finally {
     fs.unlink(filePath, () => {});
@@ -2087,6 +2093,9 @@ app.post('/api/sample-orders/upload', requireAuth, upload.single('file'), async 
     });
   } catch (err) {
     console.error('样品订单导入失败:', err);
+    if (err.code === 'IMPORT_DATE_FORMAT') {
+      return res.status(400).json({ success: false, message: err.message });
+    }
     res.status(500).json({ success: false, message: '样品订单导入失败' });
   } finally {
     fs.unlink(filePath, () => {});
