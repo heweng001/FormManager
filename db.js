@@ -25,9 +25,11 @@ function saveDb() {
 }
 
 let listEnrichMapsCache = null;
+let auditTabCountsCache = null;
 
 function invalidateListEnrichMapsCache() {
   listEnrichMapsCache = null;
+  auditTabCountsCache = null;
 }
 
 function getListEnrichMaps() {
@@ -35,9 +37,9 @@ function getListEnrichMaps() {
   listEnrichMapsCache = {
     tagMap: getInfluencerMergedTagsMap(),
     metaMap: buildInfluencerMetaMapForStats(),
-    auditSummaryMap: getInfluencerApplicationAuditSummaryMap(),
+    auditSummaryMap: getInfluencerApplicationAuditSummaryMap({ light: true }),
     sampleOrderMaps: buildSampleOrderIndexMaps(),
-    collaboratedKeys: getRealCollaboratedInfluencerKeySet(),
+    collaboratedKeys: getRealCollaboratedInfluencerKeySetLight(),
     emailMap: getInfluencerEmailMap(),
     phoneMap: getInfluencerPhoneMap(),
     whatsappMap: getInfluencerWhatsappMap(),
@@ -175,6 +177,16 @@ function migrateRecordsAuditStatusAt() {
     `);
     saveDb();
   }
+}
+
+function migrateRecordsListIndexes() {
+  db.run(`CREATE INDEX IF NOT EXISTS idx_records_influencer_id ON records(influencer_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_records_audit_status ON records(audit_status)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_records_audit_status_at ON records(audit_status_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_records_import_batch_time ON records(import_batch_time)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_sku_models_sku_id ON sku_models(sku_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_sample_orders_buyer ON sample_orders(buyer_username)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_alliance_orders_creator ON alliance_orders(creator_username)`);
 }
 
 function migrateSkuModelsShopName() {
@@ -594,20 +606,26 @@ function formatAuditStatusLabel(statusKey) {
   return labels[statusKey] || statusKey;
 }
 
-function getInfluencerApplicationAuditSummaryMap() {
+function getInfluencerApplicationAuditSummaryMap(options = {}) {
+  const light = options.light !== false;
   const map = new Map();
-  queryRows(
+  const sql = light
+    ? `
+    SELECT r.influencer_id, r.audit_status, r.audit_status_at
+    FROM records r
+    WHERE TRIM(COALESCE(r.influencer_id, '')) != ''
     `
+    : `
     SELECT
       r.id, r.influencer_id, r.application_id, r.audit_status, r.audit_status_at,
       r.audit_reason, r.remark, r.last_updated_by, r.last_updated_at,
       r.update_time, r.commission, sm.model_name AS model
     FROM records r
-    LEFT JOIN sku_models sm ON TRIM(COALESCE(r.sku_id, '')) = TRIM(sm.sku_id)
+    LEFT JOIN sku_models sm ON r.sku_id = sm.sku_id
     WHERE TRIM(COALESCE(r.influencer_id, '')) != ''
     ORDER BY r.id DESC
-    `
-  ).forEach((row) => {
+    `;
+  queryRows(sql).forEach((row) => {
     const key = resolveCanonicalInfluencerKey(row.influencer_id);
     if (!key) return;
     if (!map.has(key)) {
@@ -615,29 +633,38 @@ function getInfluencerApplicationAuditSummaryMap() {
         influencer_id: resolveCanonicalInfluencerId(row.influencer_id),
         statusSet: new Set(),
         applications: [],
+        latest_audit_status_at: '',
+        application_count: 0,
       });
     }
     const entry = map.get(key);
     const statusKey = normalizeAuditStatusKey(row.audit_status);
     entry.statusSet.add(statusKey);
-    entry.applications.push({
-      record_id: row.id,
-      application_id: String(row.application_id || '').trim() || `#${row.id}`,
-      audit_status: String(row.audit_status || '').trim(),
-      audit_status_key: statusKey,
-      audit_status_label: formatAuditStatusLabel(statusKey),
-      audit_status_at: String(row.audit_status_at || '').trim(),
-      audit_reason: String(row.audit_reason || '').trim(),
-      remark: String(row.remark || '').trim(),
-      audited_by: statusKey === 'pending' ? '' : String(row.last_updated_by || '').trim(),
-      update_time: String(row.update_time || '').trim(),
-      model: String(row.model || '').trim(),
-      commission: String(row.commission || '').trim(),
-    });
+    entry.application_count += 1;
+    const auditAt = String(row.audit_status_at || '').trim();
+    if (auditAt && (!entry.latest_audit_status_at || auditAt > entry.latest_audit_status_at)) {
+      entry.latest_audit_status_at = auditAt;
+    }
+    if (!light) {
+      entry.applications.push({
+        record_id: row.id,
+        application_id: String(row.application_id || '').trim() || `#${row.id}`,
+        audit_status: String(row.audit_status || '').trim(),
+        audit_status_key: statusKey,
+        audit_status_label: formatAuditStatusLabel(statusKey),
+        audit_status_at: auditAt,
+        audit_reason: String(row.audit_reason || '').trim(),
+        remark: String(row.remark || '').trim(),
+        audited_by: statusKey === 'pending' ? '' : String(row.last_updated_by || '').trim(),
+        update_time: String(row.update_time || '').trim(),
+        model: String(row.model || '').trim(),
+        commission: String(row.commission || '').trim(),
+      });
+    }
   });
   map.forEach((entry) => {
     entry.has_mixed_audit_status = entry.statusSet.size > 1;
-    entry.application_count = entry.applications.length;
+    if (!entry.application_count) entry.application_count = entry.applications.length;
   });
   return map;
 }
@@ -651,6 +678,24 @@ function getRealCollaboratedInfluencerKeySet() {
   const aggMap = buildAllianceOrderStatsByInfluencerKey();
   const recordMap = getMergedRecordSummaryByInfluencer();
   return collectRealCollaboratedInfluencerKeys({ sampleBuyerMap, aggMap, recordMap });
+}
+
+/** 列表 enrichment 用：仅采样单买家 + 联盟达人，避免全量联盟聚合。 */
+function getRealCollaboratedInfluencerKeySetLight() {
+  const keys = new Set();
+  queryRows(
+    `SELECT DISTINCT buyer_username AS buyer_username FROM sample_orders WHERE TRIM(COALESCE(buyer_username, '')) != ''`
+  ).forEach((row) => {
+    const key = resolveCanonicalInfluencerKey(row.buyer_username);
+    if (key) keys.add(key);
+  });
+  queryRows(
+    `SELECT DISTINCT creator_username AS creator_username FROM alliance_orders WHERE TRIM(COALESCE(creator_username, '')) != ''`
+  ).forEach((row) => {
+    const key = resolveCanonicalInfluencerKey(row.creator_username);
+    if (key) keys.add(key);
+  });
+  return keys;
 }
 
 function enrichRecordsWithMergedFields(rows, options = {}) {
@@ -729,11 +774,13 @@ function enrichRecordWithMergedFields(
   if (auditSummary) {
     row.influencer_mixed_audit = auditSummary.has_mixed_audit_status;
     row.influencer_application_count = auditSummary.application_count;
-    row.influencer_applications = auditSummary.applications;
+    row.influencer_applications = auditSummary.applications || [];
+    row.influencer_latest_audit_at = auditSummary.latest_audit_status_at || '';
   } else {
     row.influencer_mixed_audit = false;
     row.influencer_application_count = 0;
     row.influencer_applications = [];
+    row.influencer_latest_audit_at = '';
   }
   const collabKeys = collaboratedKeys || getRealCollaboratedInfluencerKeySet();
   row.is_collaborated = !!canonicalKey && collabKeys.has(canonicalKey);
@@ -1025,6 +1072,7 @@ async function initDatabase() {
   migrateInfluencerIdAliases();
 
   migrateRecordsAuditStatusAt();
+  migrateRecordsListIndexes();
   migrateSkuModelsShopName();
   migrateArticlesAuthor();
   backfillImportBatchTime();
@@ -1261,11 +1309,13 @@ function recordsSelectFields(prefix = 'r') {
   `;
 }
 
-function recordsFromJoin() {
+function recordsFromJoin(options = {}) {
+  const withSku = options.withSku !== false;
+  const withProfile = options.withProfile !== false;
   return `
     FROM records r
-    LEFT JOIN sku_models sm ON TRIM(COALESCE(r.sku_id, '')) = TRIM(sm.sku_id)
-    LEFT JOIN influencer_profiles ip ON TRIM(r.influencer_id) = TRIM(ip.influencer_id)
+    ${withSku ? 'LEFT JOIN sku_models sm ON r.sku_id = sm.sku_id' : ''}
+    ${withProfile ? 'LEFT JOIN influencer_profiles ip ON r.influencer_id = ip.influencer_id' : ''}
   `;
 }
 
@@ -1535,17 +1585,34 @@ function getOrderClause(filters = {}, prefix = '') {
 
 function countMatchingRecords(filters = {}) {
   const { clause, params } = buildRecordWhereForJoin(filters);
-  return queryOne(`SELECT COUNT(*) AS total ${recordsFromJoin()} ${clause}`, params)?.total || 0;
+  return queryOne(`SELECT COUNT(*) AS total ${recordsFromJoin({ withSku: false, withProfile: false })} ${clause}`, params)?.total || 0;
 }
 
 function countDistinctInfluencers(filters = {}) {
   const { clause, params } = buildRecordWhereForJoin(filters);
   return (
     queryOne(
-      `SELECT COUNT(DISTINCT r.influencer_id) AS total ${recordsFromJoin()} ${clause}`,
+      `SELECT COUNT(DISTINCT r.influencer_id) AS total ${recordsFromJoin({ withSku: false, withProfile: false })} ${clause}`,
       params
     )?.total || 0
   );
+}
+
+function countRecordsAndInfluencers(filters = {}) {
+  const { clause, params } = buildRecordWhereForJoin(filters);
+  const row = queryOne(
+    `
+    SELECT COUNT(*) AS total,
+           COUNT(DISTINCT r.influencer_id) AS totalInfluencers
+    ${recordsFromJoin({ withSku: false, withProfile: false })}
+    ${clause}
+    `,
+    params
+  );
+  return {
+    total: Number(row?.total) || 0,
+    totalInfluencers: Number(row?.totalInfluencers) || 0,
+  };
 }
 
 function getInfluencerOrderByClause(filters = {}) {
@@ -1585,7 +1652,7 @@ function getPagedInfluencerIds(filters = {}, limit, offset) {
   const rows = queryRows(
     `
     SELECT r.influencer_id
-    ${recordsFromJoin()}
+    ${recordsFromJoin({ withSku: false, withProfile: true })}
     ${clause}
     GROUP BY r.influencer_id
     ORDER BY ${orderBy}
@@ -1609,8 +1676,7 @@ function getRecords(filters = {}) {
   const pageSize = Math.min(200, Math.max(1, parseInt(filters.pageSize, 10) || 50));
   const offset = (page - 1) * pageSize;
 
-  const totalRecords = countMatchingRecords(filters);
-  const totalInfluencers = countDistinctInfluencers(filters);
+  const { total: totalRecords, totalInfluencers } = countRecordsAndInfluencers(filters);
   const influencerIds = getPagedInfluencerIds(filters, pageSize, offset);
 
   if (!influencerIds.length) {
@@ -1880,19 +1946,51 @@ function getShopNameFilterOptions(filters = {}) {
 }
 
 function getAuditTabCounts(filters = {}) {
-  const tabs = ['all', 'pending', 'tentative', 'approved', 'rejected'];
-  const counts = {};
-  tabs.forEach((tab) => {
-    const { clause, params } = buildInfluencerScopeClause({ ...filters, audit_tab: tab });
-    counts[tab] = queryOne(`SELECT COUNT(*) AS total FROM records ${clause}`, params)?.total || 0;
+  const baseFilters = { ...filters };
+  delete baseFilters.audit_tab;
+  delete baseFilters.sort_field;
+  delete baseFilters.sort_order;
+  delete baseFilters.page;
+  delete baseFilters.pageSize;
+  delete baseFilters.apply_pin;
+
+  const cacheKey = JSON.stringify(baseFilters);
+  if (
+    auditTabCountsCache &&
+    auditTabCountsCache.key === cacheKey &&
+    Date.now() - auditTabCountsCache.at < 20000
+  ) {
+    return Promise.resolve(auditTabCountsCache.value);
+  }
+
+  const { conditions, params } = buildBaseConditions(baseFilters, {
+    includeAssigneeScope: true,
+    prefix: '',
   });
-  return Promise.resolve({
-    all: counts.all,
-    pending: counts.pending,
-    tentative: counts.tentative,
-    approved: counts.approved,
-    rejected: counts.rejected,
-  });
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const audit = auditCondition();
+  const row = queryOne(
+    `
+    SELECT
+      COUNT(*) AS all_cnt,
+      SUM(CASE WHEN ${audit.pending} THEN 1 ELSE 0 END) AS pending_cnt,
+      SUM(CASE WHEN ${audit.tentative} THEN 1 ELSE 0 END) AS tentative_cnt,
+      SUM(CASE WHEN ${audit.approved} THEN 1 ELSE 0 END) AS approved_cnt,
+      SUM(CASE WHEN ${audit.rejected} THEN 1 ELSE 0 END) AS rejected_cnt
+    FROM records
+    ${where}
+    `,
+    params
+  );
+  const value = {
+    all: Number(row?.all_cnt) || 0,
+    pending: Number(row?.pending_cnt) || 0,
+    tentative: Number(row?.tentative_cnt) || 0,
+    approved: Number(row?.approved_cnt) || 0,
+    rejected: Number(row?.rejected_cnt) || 0,
+  };
+  auditTabCountsCache = { key: cacheKey, at: Date.now(), value };
+  return Promise.resolve(value);
 }
 
 function findRecordById(id) {
@@ -5792,7 +5890,7 @@ function buildCollaboratedRows(filters = {}) {
   const followUpSummaryMap = getInfluencerFollowUpSummaryMap();
   const emailSendMap = getLatestEmailSendSummaryMap();
   const videoMap = buildInfluencerVideoStatsByCreatorKey();
-  const auditSummaryMap = getInfluencerApplicationAuditSummaryMap();
+  const auditSummaryMap = getInfluencerApplicationAuditSummaryMap({ light: true });
   const allKeys = collectRealCollaboratedInfluencerKeys({ sampleBuyerMap, aggMap, recordMap });
   const groupedKeys = groupNormalizedKeysByCanonical(allKeys, sampleBuyerMap, allianceCreatorMap);
 

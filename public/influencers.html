@@ -419,6 +419,7 @@
         const text = String(value || '').trim().replace('T', ' ').slice(0, 19);
         if (text) times.push(text);
       };
+      push(record?.influencer_latest_audit_at);
       push(record?.audit_status_at);
       (record?.influencer_applications || []).forEach((app) => push(app.audit_status_at));
       times.sort((a, b) => b.localeCompare(a));
@@ -432,6 +433,7 @@
         const text = String(value || '').trim().replace('T', ' ').slice(0, 19);
         if (text) times.push(text);
       };
+      push(record?.influencer_latest_audit_at);
       push(record?.audit_status_at);
       (record?.influencer_applications || []).forEach((app) => push(app.audit_status_at));
       times.sort((a, b) => b.localeCompare(a));
