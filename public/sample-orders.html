@@ -68,7 +68,7 @@
                     tips: [
                       '第 1 列（订单 id）为唯一标识，重复记录将跳过。',
                       '寄样日期筛选与统计仅使用第 30 列寄样时间，与签收时间无关。',
-                      '寄样/签收时间按日/月/年（DD/MM）解析，展示为 yyyy/MM/dd；月份大于 12 时整批导入失败。',
+                      '寄样/签收时间按月/日/年（MM/DD）解析，展示为 yyyy/MM/dd；前两位数（月）大于 12 时整批导入失败。',
                     ],
                   })}
                   <input type="file" id="fileInput" accept="${IMPORT_FILE_ACCEPT}" style="display:none" />

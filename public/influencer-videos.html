@@ -211,7 +211,7 @@
                     dataStartRow: INFLUENCER_VIDEO_DATA_START_ROW,
                     tips: [
                       '内容 id（第 2 列）为唯一标识，重复记录将跳过。',
-                      '发布日期按日/月/年（DD/MM）解析，展示为 yyyy/MM/dd；月份大于 12 时整批导入失败。',
+                      '发布日期按月/日/年（MM/DD）解析，展示为 yyyy/MM/dd；前两位数（月）大于 12 时整批导入失败。',
                     ],
                   })}
                   <input type="file" id="fileInput" accept="${IMPORT_FILE_ACCEPT}" style="display:none" />
