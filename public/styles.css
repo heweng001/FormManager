@@ -633,14 +633,15 @@ input.erp-input.erp-date-input {
 .erp-stats-combo {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 4px;
   white-space: nowrap;
 }
 
 .erp-stats-combo-side {
   color: #64748b;
-  font-size: 12px;
+  font-size: inherit;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .erp-follow-up-remind-row {
@@ -2523,6 +2524,20 @@ input.erp-input.erp-date-input {
 
 .erp-table-sample-stats .erp-stats-link {
   font-weight: 600;
+  font-size: inherit;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.erp-table-sample-stats .erp-stats-num {
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.erp-table-sample-stats .erp-stats-value {
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
 .erp-table-sample-stats thead {

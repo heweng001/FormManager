@@ -36,32 +36,32 @@
         key: 'fulfillment_combo',
         label: '履约',
         group: 'sample',
-        help: '履约达人数：寄样后发过视频的达人数（可点击下钻已合作）。履约率：履约达人数 ÷ 寄样数 × 100%。一行显示为「人数 履约率」。',
+        help: '履约达人数：寄样后发过视频的达人数（可点击下钻已合作）。履约率：履约达人数 ÷ 寄样数 × 100%。一行显示为「人数 (履约率)」。',
       },
       {
         key: 'video_combo',
         label: '发视频',
         group: 'sample',
-        help: '发视频数：寄样后发布的去重内容 ID 数（可点击）。视频产出率：发视频数 ÷ 寄样数，保留两位小数。一行显示为「发视频数 产出率」。',
+        help: '发视频数：寄样后发布的去重内容 ID 数（可点击）。视频产出率：发视频数 ÷ 寄样数，保留两位小数。一行显示为「发视频数 (产出率)」。',
       },
       {
         key: 'ordered_combo',
         label: '出单达人',
         group: 'alliance',
-        help: '出单达人数：寄样后有联盟支付的达人数（可点击）。达人出单率：出单达人数 ÷ 寄样数 × 100%。一行显示为「人数 出单率」。',
+        help: '出单达人数：寄样后有联盟支付的达人数（可点击）。达人出单率：出单达人数 ÷ 寄样数 × 100%。一行显示为「人数 (出单率)」。',
       },
       {
         key: 'video_count',
         label: '出单视频数',
         group: 'alliance',
-        linkType: null,
-        help: '统计口径：满足出单条件的联盟订单中，去重后的内容 ID 数量。',
+        linkType: 'influencer-videos',
+        help: '统计口径：满足出单条件的联盟订单中，去重后的内容 ID 数量。点击跳转到达人视频列表（寄样后发布）。',
       },
       {
         key: 'order_combo',
         label: '出单',
         group: 'alliance',
-        help: '出单数：寄样后联盟订单条数（可点击）。平均出单数：出单数 ÷ 寄样数，保留 1 位小数。一行显示为「出单数 均值」。',
+        help: '出单数：寄样后联盟订单条数（可点击）。平均出单数：出单数 ÷ 寄样数，保留 1 位小数。一行显示为「出单数 (均值)」。',
       },
     ];
 
@@ -230,20 +230,26 @@
     }
 
     function renderLinkedCount(text, href, allowLink) {
-      if (!allowLink || !href || href === '#') return escapeHtml(text);
+      if (!allowLink || !href || href === '#') {
+        return `<span class="erp-stats-num">${escapeHtml(text)}</span>`;
+      }
       return `<a href="${escapeAttr(href)}" class="erp-link-external erp-stats-link">${escapeHtml(text)}</a>`;
     }
 
+    function renderPlainValue(text) {
+      return `<span class="erp-stats-num">${escapeHtml(text)}</span>`;
+    }
+
     function renderComboCell(mainHtml, sideText) {
-      return `<span class="erp-stats-combo">${mainHtml}<span class="erp-stats-combo-side">${escapeHtml(sideText)}</span></span>`;
+      const side = sideText == null || sideText === '' ? '-' : String(sideText);
+      return `<span class="erp-stats-combo">${mainHtml}<span class="erp-stats-combo-side">(${escapeHtml(side)})</span></span>`;
     }
 
     function renderMetricCell(row, metric, assignee) {
-      const allowLink = !!metric.linkType && assignee !== '__total__';
       const assigneeParam = assignee === '__total__' ? '' : assignee;
 
       if (metric.key === 'approval_rate') {
-        return escapeHtml(formatRatePercent(row.approval_rate));
+        return renderPlainValue(formatRatePercent(row.approval_rate));
       }
       if (metric.key === 'fulfillment_combo') {
         const count = String(row.published_influencer_count ?? 0);
@@ -281,7 +287,7 @@
       const value = row[metric.key];
       const text = String(value ?? 0);
       if (!metric.linkType || assignee === '__total__') {
-        return escapeHtml(text);
+        return renderPlainValue(text);
       }
       let href = '#';
       if (metric.linkType === 'pending') {
